@@ -56,11 +56,17 @@ export function createUpstoxFeed({
 
       ws.on('open', () => {
         const guid = uuidv4().replace(/-/g, '').slice(0, 20);
-        const sub = { guid, method: 'sub', data: { mode, instrumentKeys } };
+        // Upstox v3 expects snake_case: instrument_keys
+        const sub = { guid, method: 'sub', data: { mode, instrument_keys: instrumentKeys } };
         const jsonPayload = JSON.stringify(sub);
-        if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] Sending subscription JSON:', jsonPayload);
+        console.log('[Upstox] WebSocket opened, sending subscription...');
+        console.log(`[Upstox] Subscribing to ${instrumentKeys.length} keys in ${mode} mode`);
+        if (process.env.LOG_UPSTOX_DEBUG) {
+          console.log('[Upstox] Subscription payload:', jsonPayload);
+          console.log('[Upstox] First 5 instrument keys:', instrumentKeys.slice(0, 5));
+        }
         try { ws.send(jsonPayload); } catch (e) {
-          if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] JSON subscription send failed', e.message);
+          console.error('[Upstox] JSON subscription send failed:', e.message);
         }
         // Attempt a binary subscription (best-effort; request proto may differ)
         try {
@@ -100,6 +106,19 @@ export function createUpstoxFeed({
             emitter.emit('ready');
             if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] First protobuf frame type:', msg.type);
           }
+          // Subscription status handling (success/errors)
+          if (msg?.subscription) {
+            const succ = Object.keys(msg.subscription.success || {});
+            const errs = msg.subscription.errors || {};
+            const errEntries = Object.entries(errs).map(([k, v]) => ({ key: k, reason: String(v?.message || v || 'unknown') }));
+            if (succ.length || errEntries.length) {
+              if (process.env.LOG_UPSTOX_DEBUG) {
+                console.log('[Upstox] Subscribed ok:', succ.length, 'errors:', errEntries.length);
+                if (errEntries.length) console.log('[Upstox] Subscription errors sample:', errEntries.slice(0, 5));
+              }
+              emitter.emit('subStatus', { success: succ, errors: errEntries });
+            }
+          }
           if (msg?.feeds) {
             if (process.env.LOG_UPSTOX_DEBUG) {
               console.log('[Upstox] Feed keys received:', Object.keys(msg.feeds));
@@ -107,9 +126,21 @@ export function createUpstoxFeed({
             Object.entries(msg.feeds).forEach(([key, feedObj]) => {
               if (instrumentKeys.includes(key) && feedObj.ltpc && typeof feedObj.ltpc.ltp === 'number') {
                 const ltp = feedObj.ltpc.ltp;
+                const cp = feedObj.ltpc.cp || feedObj.ltpc.close_price || null;
                 const ts = Number(msg.currentTs || Date.now());
-                emitter.emit('price', { instrumentKey: key, ltp, ts });
+                
+                const tickData = {
+                  instrumentKey: key,
+                  ltp,
+                  ts,
+                  changePct: cp && cp > 0 ? ((ltp - cp) / cp) * 100 : null,
+                  change: cp ? ltp - cp : null
+                };
+                
+                emitter.emit('price', tickData);
                 if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] Tick', key, ltp);
+              } else if (process.env.LOG_UPSTOX_DEBUG && instrumentKeys.includes(key)) {
+                console.log('[Upstox] Feed received but no valid LTP for', key, ':', JSON.stringify(feedObj).slice(0, 200));
               }
             });
           } else if (process.env.LOG_UPSTOX_DEBUG) {

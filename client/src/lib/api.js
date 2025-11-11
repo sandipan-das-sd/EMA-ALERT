@@ -22,8 +22,8 @@ async function request(path, { method = 'GET', body } = {}) {
   }
 }
 
-export async function signup(email, password) {
-  const data = await request('/api/auth/signup', { method: 'POST', body: { email, password } });
+export async function signup(name, email, password) {
+  const data = await request('/api/auth/signup', { method: 'POST', body: { name, email, password } });
   return data.user;
 }
 
@@ -48,4 +48,57 @@ export async function logout() {
   } catch {
     // ignore logout errors
   }
+}
+
+// Watchlist APIs
+export async function getWatchlist() {
+  const data = await request('/api/watchlist');
+  return data.watchlist || [];
+}
+
+export async function addToWatchlist(instrumentKey) {
+  const data = await request('/api/watchlist', { method: 'POST', body: { instrumentKey } });
+  return data.watchlist || [];
+}
+
+export async function removeFromWatchlist(instrumentKey) {
+  const data = await request(`/api/watchlist/${encodeURIComponent(instrumentKey)}`, { method: 'DELETE' });
+  return data.watchlist || [];
+}
+
+// Market status API
+export async function marketStatus(exchange = 'NSE') {
+  const data = await request(`/api/market/status?exchange=${encodeURIComponent(exchange)}`);
+  return data; // { exchange, isOpen, statusText, httpStatus, raw, ts }
+}
+
+// Notes APIs
+export async function getNotes() {
+  const data = await request('/api/notes');
+  return data.notes || [];
+}
+
+export async function createNote(title, content, tags = []) {
+  const data = await request('/api/notes', { 
+    method: 'POST', 
+    body: { title, content, tags } 
+  });
+  return data.note;
+}
+
+export async function updateNote(noteId, title, content, tags) {
+  const data = await request(`/api/notes/${noteId}`, {
+    method: 'PUT',
+    body: { title, content, tags }
+  });
+  return data.note;
+}
+
+export async function deleteNote(noteId) {
+  await request(`/api/notes/${noteId}`, { method: 'DELETE' });
+}
+
+export async function searchNotes(query) {
+  const data = await request(`/api/notes/search?q=${encodeURIComponent(query)}`);
+  return data.notes || [];
 }

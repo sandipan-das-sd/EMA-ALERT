@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { signup } from '../lib/api.js';
 
 export default function Signup({ onAuthed }) {
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -13,7 +14,7 @@ export default function Signup({ onAuthed }) {
     setError('');
     setLoading(true);
     try {
-      const user = await signup(email, password);
+      const user = await signup(name, email, password);
       onAuthed(user);
     } catch (e) {
       setError(e.message);
@@ -29,8 +30,12 @@ export default function Signup({ onAuthed }) {
         {error && <div className="mb-4 text-red-600 text-sm">{error}</div>}
         <form className="space-y-4" onSubmit={onSubmit}>
           <div>
+            <label className="block text-sm mb-1">Name</label>
+            <input className="input" type="text" placeholder="Enter your name" value={name} onChange={(e) => setName(e.target.value)} required />
+          </div>
+          <div>
             <label className="block text-sm mb-1">Email</label>
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <input className="input" type="email" placeholder="Enter your email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </div>
           <div>
             <label className="block text-sm mb-1">Password</label>

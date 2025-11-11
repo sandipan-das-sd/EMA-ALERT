@@ -3,6 +3,11 @@ import bcrypt from 'bcryptjs';
 
 const userSchema = new mongoose.Schema(
   {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     email: {
       type: String,
       required: true,
@@ -16,6 +21,31 @@ const userSchema = new mongoose.Schema(
       minlength: 8,
       select: false,
     },
+    // Array of instrument keys like "NSE_EQ|ABB"
+    watchlist: {
+      type: [String],
+      default: [],
+    },
+    notes: [{
+      title: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+      content: {
+        type: String,
+        required: true,
+      },
+      tags: [String],
+      createdAt: {
+        type: Date,
+        default: Date.now,
+      },
+      updatedAt: {
+        type: Date,
+        default: Date.now,
+      },
+    }],
     createdAt: {
       type: Date,
       default: Date.now,

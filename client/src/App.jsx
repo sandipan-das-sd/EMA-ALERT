@@ -4,6 +4,8 @@ import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Watchlist from './pages/Watchlist.jsx';
+import Notes from './pages/Notes.jsx';
 import { getMe } from './lib/api.js';
 
 export default function App() {
@@ -40,6 +42,8 @@ export default function App() {
       <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onAuthed={handleAuthed} />} />
       <Route path="/signup" element={user ? <Navigate to="/dashboard" /> : <Signup onAuthed={handleAuthed} />} />
       <Route path="/dashboard" element={user ? <Dashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
+      <Route path="/watchlist" element={user ? <Watchlist user={user} /> : <Navigate to="/" />} />
+      <Route path="/notes" element={user ? <Notes /> : <Navigate to="/" />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
