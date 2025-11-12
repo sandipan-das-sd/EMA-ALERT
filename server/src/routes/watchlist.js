@@ -2,6 +2,8 @@ import express from 'express';
 import User from '../models/User.js';
 import { protect } from '../middleware/auth.js';
 import { marketState } from '../services/marketState.js';
+import { dynamicSubscriptionManager } from '../services/dynamicSubscription.js';
+import { instrumentsSearchService } from '../services/instrumentsSearch.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,14 +28,39 @@ router.get('/', async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     const items = user.watchlist || [];
-    const snapshot = items.map(key => ({
-      key,
-      price: marketState.latestQuotes[key]?.ltp || marketState.lastTicks[key]?.ltp || null,
-      changePct: marketState.latestQuotes[key]?.changePct || null,
-      ts: marketState.latestQuotes[key]?.ts || marketState.lastTicks[key]?.ts || null,
-    }));
+    
+    console.log('[Watchlist] Processing items:', items);
+    console.log('[Watchlist] Available market quotes keys:', Object.keys(marketState.latestQuotes).slice(0, 5));
+    console.log('[Watchlist] Available market ticks keys:', Object.keys(marketState.lastTicks).slice(0, 5));
+    
+    const snapshot = items.map(key => {
+      // Get price data
+      const price = marketState.latestQuotes[key]?.ltp || marketState.lastTicks[key]?.ltp || null;
+      const changePct = marketState.latestQuotes[key]?.changePct || null;
+      const change = marketState.latestQuotes[key]?.change || null;
+      const ts = marketState.latestQuotes[key]?.ts || marketState.lastTicks[key]?.ts || null;
+      
+      console.log(`[Watchlist] ${key}: price=${price}, changePct=${changePct}`);
+      
+      // Get instrument details from search service
+      const instrument = instrumentsSearchService.getInstrument(key);
+      
+      return {
+        key,
+        name: instrument?.name || key.split('|')[1] || key,
+        tradingSymbol: instrument?.tradingSymbol || key.split('|')[1] || key,
+        segment: instrument?.segment || key.split('|')[0] || 'Unknown',
+        price,
+        changePct,
+        change,
+        ts
+      };
+    });
+    
+    console.log('[Watchlist] Returning snapshot with prices:', snapshot.map(s => `${s.key}: ${s.price}`));
     res.json({ watchlist: snapshot });
   } catch (e) {
+    console.error('Watchlist fetch error:', e);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -51,6 +78,8 @@ router.post('/', async (req, res) => {
     if (!user.watchlist.includes(instrumentKey)) {
       user.watchlist.push(instrumentKey);
       await user.save();
+      // Trigger dynamic subscription update
+      await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
     }
     res.status(201).json({ watchlist: user.watchlist });
   } catch (e) {
@@ -66,6 +95,8 @@ router.delete('/:instrumentKey', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     user.watchlist = user.watchlist.filter(k => k !== instrumentKey);
     await user.save();
+    // Trigger dynamic subscription update
+    await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
     res.json({ watchlist: user.watchlist });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });

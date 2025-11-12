@@ -9,8 +9,11 @@ import dns from 'dns';
 import authRouter from './routes/auth.js';
 import watchlistRouter from './routes/watchlist.js';
 import notesRouter from './routes/notes.js';
+import instrumentsRouter from './routes/instruments.js';
 import { createUpstoxFeed } from './services/upstoxFeed.js';
 import { startUpstoxPoller } from './services/upstoxPoller.js';
+import { instrumentsSearchService } from './services/instrumentsSearch.js';
+import { dynamicSubscriptionManager } from './services/dynamicSubscription.js';
 import fetch from 'node-fetch';
 import { WebSocketServer } from 'ws';
 import fs from 'fs';
@@ -40,6 +43,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/watchlist', watchlistRouter);
 app.use('/api/notes', notesRouter);
+app.use('/api/instruments', instrumentsRouter);
 
 const PORT = process.env.PORT || 4000;
 
@@ -57,6 +61,18 @@ async function start() {
       family: 4, // Force IPv4 to reduce DNS resolution complexity
     });
     console.log('MongoDB connected');
+    
+    // Initialize instruments search service
+    console.log('Initializing instruments search service...');
+    await instrumentsSearchService.initialize();
+    instrumentsSearchService.startAutoUpdate();
+    console.log('Instruments search service ready');
+    
+    // Initialize dynamic subscription manager
+    console.log('Initializing dynamic subscription manager...');
+    await dynamicSubscriptionManager.initializeAllWatchlists();
+    console.log('Dynamic subscription manager ready');
+    
     const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
     // WS server to stream price ticks to frontend clients
@@ -64,6 +80,14 @@ async function start() {
   wss.clients.forEach = wss.clients.forEach.bind(wss.clients); // defensive in some node/ws combos
     const apiBase = process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3';
     const accessToken = process.env.UPSTOX_ACCESS_TOKEN;
+    
+    if (!accessToken) {
+      console.warn('⚠️  UPSTOX_ACCESS_TOKEN not found in environment variables');
+      console.warn('   Real-time price data will not be available');
+      console.warn('   Please create a .env file with valid Upstox API credentials');
+      console.warn('   See .env.example for required configuration');
+    }
+    
     const indexKeys = (process.env.UPSTOX_INDEX_KEYS || process.env.UPSTOX_INSTRUMENTS || 'NSE_INDEX|Nifty 50')
       .split(',').map(s=>s.trim()).filter(Boolean);
     // Load scalable universe of instruments (200+) from JSON file; fallback to env if absent
@@ -120,8 +144,14 @@ async function start() {
     // Subscribe to resolved universe keys
     const universeKeys = resolvedUniverse.map((u) => u.instrumentKey).filter(Boolean);
     const envWatchlist = (process.env.UPSTOX_WATCHLIST_KEYS || '').split(',').map(s=>s.trim()).filter(Boolean);
-    // Subscribe to the union of universe, env-provided, and indices
-    const watchlistKeys = Array.from(new Set([...universeKeys, ...envWatchlist, ...indexKeys]));
+    // Set base subscription keys in dynamic subscription manager
+    const baseKeys = Array.from(new Set([...universeKeys, ...envWatchlist, ...indexKeys]));
+    dynamicSubscriptionManager.setBaseSubscription(baseKeys);
+    
+    // Get initial subscription keys (base + user watchlists)
+    let currentSubscriptionKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
+    console.log(`[Subscription] Initial subscription: ${currentSubscriptionKeys.length} instruments`);
+    
     const pollIntervalMs = Number(process.env.UPSTOX_POLL_INTERVAL_MS) || 2000;
 
   let feed;
@@ -133,7 +163,7 @@ async function start() {
   const mode = process.env.UPSTOX_MODE || 'ltpc';
       // Subscribe only to unique, non-empty instrument keys
       // Convert ISIN-based keys to symbol-based format for better API compatibility
-      let uniqueKeys = Array.from(new Set(watchlistKeys.filter(Boolean)));
+      let uniqueKeys = Array.from(new Set(currentSubscriptionKeys.filter(Boolean)));
       
       // Convert ISIN keys to symbol format (NSE_EQ:SYMBOL) since API prefers this
       uniqueKeys = uniqueKeys.map(key => {
@@ -239,16 +269,29 @@ async function start() {
       });
 
       // Start poller for reliable quotes & gainers/losers
-      const poller = startUpstoxPoller({
+      // Build a more complete universeMapping: include resolvedUniverse and instrumentsSearchService entries
+      const buildUniverseMapping = () => {
+        const map = resolvedUniverse.reduce((acc, u) => { if (u.instrumentKey && u.symbol) acc[u.instrumentKey] = u.symbol; return acc; }, {});
+        try {
+          // instrumentsSearchService.instruments is a Map(instrument_key -> instrument)
+          for (const [ik, inst] of instrumentsSearchService.instruments) {
+            if (inst && inst.tradingSymbol) {
+              map[ik] = inst.tradingSymbol;
+            }
+          }
+        } catch (e) {
+          if (process.env.DEBUG_UPSTOX) console.warn('[UniverseMapping] Could not extend mapping from instrumentsSearchService:', e.message);
+        }
+        return map;
+      };
+
+      let poller = startUpstoxPoller({
         accessToken,
         apiBase,
-        instrumentKeys: watchlistKeys,
+        instrumentKeys: currentSubscriptionKeys,
         intervalMs: pollIntervalMs,
         batchSize: Number(process.env.UPSTOX_LTP_BATCH) || 50,
-        universeMapping: resolvedUniverse.reduce((acc, u) => {
-          acc[u.instrumentKey] = u.symbol;
-          return acc;
-        }, {})
+        universeMapping: buildUniverseMapping()
       });
       poller.on('quotes', (quotes) => {
         console.log(`[Poller] Received ${quotes.length} quotes, ${quotes.filter(q => !q.missing).length} with prices`);
@@ -276,6 +319,121 @@ async function start() {
       });
       // Removed gainers/losers broadcast per user request
       poller.on('error', (e) => console.error('Upstox poller error:', e.message));
+      
+      // Set up dynamic subscription change handler
+      dynamicSubscriptionManager.onSubscriptionChange(async (_newKeys) => {
+        try {
+          // Recompute full set of subscription keys from manager to avoid stale/new-key mismatch
+          const allKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
+          console.log(`[DynamicSub] Subscription updated: ${allKeys.length} instruments`);
+          // Convert incoming keys (which may be ISINs) to Upstox-friendly subscription keys
+
+          // Map ISIN -> symbol using instrumentsSearchService when available, fallback to original key
+          const mappedForSub = await Promise.all(allKeys.map(async (k) => {
+            try {
+              if (String(k).includes('INE')) {
+                const inst = instrumentsSearchService.getInstrument(k);
+                if (inst && inst.tradingSymbol) {
+                  return `${inst.segment}:${inst.tradingSymbol}`;
+                }
+              }
+            } catch (e) {
+              // ignore and fallthrough to original
+            }
+            // If we couldn't map via local instruments index, fall back to the original key
+            return k;
+          }));
+
+          // Format keys according to chosenFormat (pipe/colon) used by the running feed
+          const formatted = mappedForSub.map(k => (chosenFormat === 'pipe' ? String(k).replace(/:/g, '|') : String(k).replace(/\|/g, ':')));
+          const unique = Array.from(new Set(formatted));
+          // Warn if we exceed cap and will trim keys
+          const capped = unique.slice(0, 200);
+          if (unique.length > 200) console.warn(`[DynamicSub] Subscription count ${unique.length} exceeds cap 200 - trimming to 200 keys`);
+          const finalKeys = capped;
+
+          console.log(`[DynamicSub] Re-subscribing ${finalKeys.length} keys (from ${unique.length} candidates)`);
+
+          // Recreate symbol -> original mapping for incoming keys
+          const symbolToOriginalKeyNew = {};
+          resolvedUniverse.forEach(item => {
+            if (item.symbol) symbolToOriginalKeyNew[`NSE_EQ:${item.symbol}`] = item.instrumentKey;
+          });
+          // Also add mappings from instrumentsSearchService for user keys
+          for (const orig of allKeys) {
+            try {
+              const inst = instrumentsSearchService.getInstrument(orig);
+              if (inst && inst.tradingSymbol) symbolToOriginalKeyNew[`${inst.segment}:${inst.tradingSymbol}`] = orig;
+            } catch {}
+          }
+
+          // Restart feed with new keys
+          try {
+            if (feed && typeof feed.close === 'function') {
+              feed.close();
+            }
+          } catch (e) { console.warn('[DynamicSub] Error closing old feed:', e.message); }
+
+          feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: finalKeys, mode });
+          feed.on('ready', () => {
+            feedReady = true;
+            console.log('Upstox market feed connected (dynamic update)');
+          });
+          feed.on('price', (tick) => {
+            const originalKey = symbolToOriginalKeyNew[tick.instrumentKey] || tick.instrumentKey;
+            const mappedTick = { ...tick, instrumentKey: originalKey };
+            marketState.lastTicks[originalKey] = mappedTick;
+            console.log(`[Feed] Price tick received: ${tick.instrumentKey} -> ${originalKey} = ${tick.ltp}`);
+            const payload = JSON.stringify({ type: 'tick', ...mappedTick });
+            wss.clients.forEach((client) => { if (client.readyState === 1) client.send(payload); });
+          });
+          feed.on('error', (err) => {
+            const payload = JSON.stringify({ type: 'error', message: String(err.message || err) });
+            wss.clients.forEach((client) => { if (client.readyState === 1) client.send(payload); });
+            console.error('Upstox feed error (dynamic):', err);
+          });
+          feed.on('subStatus', (st) => {
+            console.log(`[Upstox] Subscription OK (dynamic): ${st.success.length}, errors: ${st.errors.length}`);
+            if (st.errors.length) {
+              const sample = st.errors.slice(0, 5).map(e => `${e.key}: ${e.reason}`).join('; ');
+              console.warn('[Upstox] Sample subscription errors (dynamic):', sample);
+            }
+            lastSubStatus = st;
+            const payload = JSON.stringify({ type: 'subStatus', data: st });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+          });
+
+          // Restart poller with updated keys
+          try { if (poller && typeof poller.stop === 'function') poller.stop(); } catch (e) { console.warn('[DynamicSub] Error stopping old poller:', e.message); }
+          // Restart poller with the full set of subscription keys (untrimmed) so it can try mappings
+          poller = startUpstoxPoller({
+            accessToken,
+            apiBase,
+            instrumentKeys: allKeys,
+            intervalMs: pollIntervalMs,
+            batchSize: Number(process.env.UPSTOX_LTP_BATCH) || 50,
+            universeMapping: buildUniverseMapping()
+          });
+          poller.on('quotes', (quotes) => {
+            console.log(`[Poller] (dynamic) Received ${quotes.length} quotes, ${quotes.filter(q => !q.missing).length} with prices`);
+            quotes.forEach(q => { if(!q.missing && typeof q.ltp === 'number') marketState.latestQuotes[q.key] = q; });
+            const indicesSnapshot = indexKeys.map(key => ({
+              key,
+              ltp: marketState.latestQuotes[key]?.ltp ?? null,
+              cp: marketState.latestQuotes[key]?.cp ?? null,
+              changePct: marketState.latestQuotes[key]?.changePct ?? null,
+            }));
+            const payload = JSON.stringify({ type: 'indices', data: indicesSnapshot });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+            const qPayload = JSON.stringify({ type: 'quotes', data: quotes });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(qPayload); });
+          });
+          poller.on('error', (e) => console.error('Upstox poller error (dynamic):', e.message));
+
+        } catch (e) {
+          console.error('[DynamicSub] Failed to update subscriptions dynamically:', e);
+        }
+      });
     } else {
       console.warn('UPSTOX_ACCESS_TOKEN missing. WS price feed disabled.');
     }
@@ -567,9 +725,146 @@ async function start() {
           key: k,
           ltp: marketState.latestQuotes[k]?.ltp,
           ts: marketState.latestQuotes[k]?.ts
-        }))
+        })),
+        dynamicSubscriptionStats: dynamicSubscriptionManager.getStats()
       };
       res.json(status);
+    });
+
+    // Debug route to test ISIN resolution
+    app.get('/api/debug/resolve-isin', async (req, res) => {
+      const { isin } = req.query;
+      if (!isin) return res.status(400).json({ error: 'isin parameter required' });
+      
+      const instrument = instrumentsSearchService.getInstrument(isin);
+      let resolvedKey = null;
+      
+      if (instrument && instrument.tradingSymbol) {
+        resolvedKey = `${instrument.segment}:${instrument.tradingSymbol}`;
+      }
+      
+      const allSubscriptionKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
+      const isSubscribed = allSubscriptionKeys.includes(isin);
+      
+      res.json({
+        isin,
+        instrument,
+        resolvedKey,
+        isSubscribed,
+        currentPrice: marketState.latestQuotes[isin]?.ltp || marketState.lastTicks[isin]?.ltp || null
+      });
+    });
+
+    // Debug route to check FO instruments
+    app.get('/api/debug/fo-instruments', (req, res) => {
+      const foInstruments = [];
+      for (const [key, instrument] of instrumentsSearchService.instruments) {
+        if (instrument.segment === 'NSE_FO' || instrument.segment === 'BSE_FO') {
+          foInstruments.push({
+            key,
+            tradingSymbol: instrument.tradingSymbol,
+            segment: instrument.segment,
+            name: instrument.name,
+            expiry: instrument.expiry,
+            strike: instrument.strike,
+            optionType: instrument.optionType
+          });
+        }
+        if (foInstruments.length >= 20) break; // Limit to first 20 for debugging
+      }
+      
+      res.json({
+        count: foInstruments.length,
+        sample: foInstruments,
+        totalInstruments: instrumentsSearchService.instruments.size
+      });
+    });
+
+    // Debug route to test FO LTP directly
+    app.get('/api/debug/test-fo-ltp', async (req, res) => {
+      if (!accessToken) {
+        return res.status(401).json({ message: 'Access token required' });
+      }
+      
+      let { instrumentKey } = req.query;
+      if (!instrumentKey) {
+        // If no key provided, try to get a sample FO instrument from the search service
+        for (const [key, instrument] of instrumentsSearchService.instruments) {
+          if (instrument.segment === 'BSE_FO' || instrument.segment === 'NSE_FO') {
+            instrumentKey = key;
+            break;
+          }
+        }
+      }
+      
+      if (!instrumentKey) {
+        return res.status(400).json({ error: 'No FO instruments found and no instrumentKey provided' });
+      }
+      
+      try {
+        // Try multiple format variations for FO instruments
+        const variants = [
+          instrumentKey,
+          instrumentKey.replace(/\|/g, ':'),
+          instrumentKey.replace(/:/g, '|'),
+          instrumentKey.split(/[\|:]/)[1], // Just the numeric token
+          instrumentKey.split(/[\|:]/)[0] // Just the segment part
+        ].filter(Boolean);
+        
+        const results = [];
+        
+        for (const variant of variants) {
+          try {
+            const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(variant)}`;
+            console.log(`[Debug FO] Testing URL: ${url}`);
+            
+            const response = await fetch(url, {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+            });
+            
+            const data = await response.json();
+            results.push({
+              variant,
+              status: response.status,
+              hasData: !!(data?.data && Object.keys(data.data).length > 0),
+              responseKeys: data?.data ? Object.keys(data.data) : [],
+              data: data
+            });
+            
+            // If we found data, break early
+            if (data?.data && Object.keys(data.data).length > 0) {
+              break;
+            }
+          } catch (e) {
+            results.push({
+              variant,
+              error: e.message
+            });
+          }
+        }
+        
+        // Also get sample instruments from search service
+        const sampleFOInstruments = [];
+        for (const [key, instrument] of instrumentsSearchService.instruments) {
+          if ((instrument.segment === 'BSE_FO' || instrument.segment === 'NSE_FO') && sampleFOInstruments.length < 5) {
+            sampleFOInstruments.push({
+              key,
+              tradingSymbol: instrument.tradingSymbol,
+              segment: instrument.segment,
+              name: instrument.name
+            });
+          }
+        }
+        
+        res.json({
+          originalKey: instrumentKey,
+          results,
+          sampleFOInstruments,
+          recommendation: results.find(r => r.hasData) ? 'Found working variant' : 'No working variant found'
+        });
+      } catch (e) {
+        res.status(500).json({ message: 'Test failed', error: e.message });
+      }
     });
   } catch (err) {
     console.error('Mongo connection error', err);

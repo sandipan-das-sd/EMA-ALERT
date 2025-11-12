@@ -3,38 +3,136 @@ import { getWatchlist, removeFromWatchlist } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
 import MarketClock from '../components/MarketClock.jsx';
 
-export default function Watchlist({ user }) {
-  const [items, setItems] = useState([]); // [{key, price, changePct, ts}]
+export default function Watchlist({ user, setUser }) {
+  const [items, setItems] = useState([]);
+  const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
-    getWatchlist().then((wl) => { if (mounted) setItems(wl); });
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.hostname}:4000/ws/ticker`;
+    getWatchlist().then((wl) => { 
+      if (mounted) {
+        setItems(wl);
+        console.log('[Watchlist] Loaded watchlist items:', wl.map(item => `${item.key}: ${item.price}`));
+      }
+    });
+    
+    // Periodic refresh as fallback to ensure prices stay updated
+    const refreshInterval = setInterval(() => {
+      if (mounted) {
+        getWatchlist().then((wl) => {
+          if (mounted) {
+            setItems(wl);
+            console.log('[Watchlist] Periodic refresh completed');
+          }
+        }).catch(err => console.error('Periodic refresh failed:', err));
+      }
+    }, 30000); // Refresh every 30 seconds
+    
+    // Only start WebSocket for watchlist page - this implements route-based calling
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${window.location.hostname}:4000/ws/ticker`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
+    
+    ws.onopen = () => {
+      setWsConnected(true);
+      console.log('[Watchlist] WebSocket connected, refreshing data...');
+      // Refresh watchlist data when WebSocket connects to get latest prices
+      getWatchlist().then((wl) => {
+        setItems(wl);
+        console.log('[Watchlist] Refreshed watchlist on WS connect:', wl.map(item => `${item.key}: ${item.price}`));
+      });
+    };
+    
     ws.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
+        console.log('[Watchlist] WebSocket message:', msg);
+        
         if (msg.type === 'tick') {
-          setItems((prev) => prev.map(it => it.key === msg.instrumentKey ? { 
-            ...it, 
-            price: msg.ltp, 
-            ts: msg.ts,
-            changePct: msg.changePct,
-            change: msg.change 
-          } : it));
+          console.log(`[Watchlist] Processing tick for ${msg.instrumentKey}: ${msg.ltp}`);
+          setItems((prev) => {
+            const updated = prev.map(it => {
+              // Try to match on exact key or try alternative formats
+              const keyMatches = it.key === msg.instrumentKey || 
+                                 it.key.replace(/\|/g, ':') === msg.instrumentKey ||
+                                 it.key.replace(/:/g, '|') === msg.instrumentKey;
+              
+              if (keyMatches) {
+                console.log(`[Watchlist] Updating ${it.key}: ${it.price} -> ${msg.ltp}`);
+                return { 
+                  ...it, 
+                  price: msg.ltp, 
+                  ts: msg.ts,
+                  changePct: msg.changePct,
+                  change: msg.change 
+                };
+              }
+              return it;
+            });
+            return updated;
+          });
+        } else if (msg.type === 'quotes') {
+          console.log(`[Watchlist] Processing quotes batch: ${msg.data?.length} items`);
+          setItems((prev) => {
+            const updated = prev.map(it => {
+              const quote = msg.data?.find(q => 
+                q.key === it.key || 
+                q.key.replace(/\|/g, ':') === it.key ||
+                q.key.replace(/:/g, '|') === it.key ||
+                it.key.replace(/\|/g, ':') === q.key ||
+                it.key.replace(/:/g, '|') === q.key
+              );
+              if (quote && !quote.missing && typeof quote.ltp === 'number') {
+                console.log(`[Watchlist] Updating from quotes ${it.key}: ${it.price} -> ${quote.ltp}`);
+                return {
+                  ...it,
+                  price: quote.ltp,
+                  ts: quote.ts,
+                  changePct: quote.changePct,
+                  change: quote.change
+                };
+              }
+              return it;
+            });
+            return updated;
+          });
         }
-      } catch {}
+      } catch (e) {
+        console.error('WebSocket message error:', e);
+      }
     };
-    return () => { mounted = false; ws.close(); };
+    
+    ws.onerror = (err) => {
+      console.error('WebSocket error in Watchlist:', err);
+      setWsConnected(false);
+    };
+    
+    ws.onclose = () => {
+      setWsConnected(false);
+    };
+    
+    return () => { 
+      mounted = false; 
+      ws.close();
+      clearInterval(refreshInterval);
+    };
   }, []);
 
   async function onRemove(key) {
-    await removeFromWatchlist(key);
-    const wl = await getWatchlist();
-    setItems(wl);
+    try {
+      const updatedWatchlist = await removeFromWatchlist(key);
+      // Update global user state to trigger re-renders in other components
+      if (updatedWatchlist && Array.isArray(updatedWatchlist)) {
+        setUser(prevUser => ({ ...prevUser, watchlist: updatedWatchlist }));
+      }
+      // Refresh local watchlist data
+      const wl = await getWatchlist();
+      setItems(wl);
+    } catch (error) {
+      console.error('Error removing from watchlist:', error);
+    }
   }
 
   return (
@@ -45,37 +143,70 @@ export default function Watchlist({ user }) {
           <h2 className="text-2xl font-semibold">Your Watchlist</h2>
           <div className="text-sm text-slate-500">{user?.email}</div>
         </div>
-        <MarketClock exchange="NSE" compact />
+        <div className="mb-6 flex items-center justify-between">
+          <MarketClock exchange="NSE" compact />
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-slate-400">
+              {items.length} instrument{items.length !== 1 ? 's' : ''} in watchlist
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              {wsConnected ? (
+                <span className="text-green-600 flex items-center gap-1">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  Live Feed
+                </span>
+              ) : (
+                <span className="text-gray-500 flex items-center gap-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                  Offline
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
         {items.length === 0 && <div className="text-sm text-slate-500">Empty watchlist. Add instruments from Dashboard.</div>}
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {items.map(item => {
             const isUp = typeof item.changePct === 'number' && item.changePct >= 0;
+            const hasPrice = typeof item.price === 'number';
+            
             return (
-              <div key={item.key} className="border rounded-lg p-3 bg-white flex flex-col gap-2 shadow-sm hover:shadow-md transition">
+              <div key={item.key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1">
                 <div className="flex items-start justify-between">
                   <div className="flex flex-col">
-                    <div className="text-sm font-semibold tracking-wide" title={item.key}>{item.key.split('|')[1]}</div>
-                    <div className="text-xs text-slate-500">{item.key.split('|')[0]}</div>
+                    <div className="text-sm font-bold tracking-wide text-gray-900" title={item.name}>
+                      {item.tradingSymbol || item.name}
+                    </div>
+                    {item.name && item.tradingSymbol !== item.name && (
+                      <div className="text-xs text-gray-600 mt-1 truncate" title={item.name}>
+                        {item.name.length > 25 ? `${item.name.substring(0, 25)}...` : item.name}
+                      </div>
+                    )}
                   </div>
-                  <button onClick={() => onRemove(item.key)} className="text-xs text-red-600 hover:text-red-700">Remove</button>
+                  <button onClick={() => onRemove(item.key)} className="text-xs px-2 py-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
                 </div>
                 <div className="flex items-baseline gap-3">
                   <span className={`text-xl font-semibold tabular-nums ${
-                    typeof item.changePct === 'number' 
+                    hasPrice && typeof item.changePct === 'number' 
                       ? (item.changePct >= 0 ? 'text-green-600' : 'text-red-600')
                       : 'text-gray-900'
                   }`}>
-                    {typeof item.price === 'number' ? item.price.toLocaleString('en-IN') : '—'}
+                    {hasPrice ? `₹${item.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'No data'}
                   </span>
-                  {typeof item.changePct === 'number' && (
+                  {hasPrice && typeof item.changePct === 'number' && (
                     <span className={`text-sm font-medium tabular-nums ${isUp ? 'text-green-600' : 'text-red-600'}`}>
                       {isUp ? '+' : ''}{item.changePct.toFixed(2)}%
                     </span>
                   )}
                 </div>
-                {typeof item.change === 'number' && (
+                {hasPrice && typeof item.change === 'number' && (
                   <div className={`text-xs tabular-nums ${isUp ? 'text-green-600' : 'text-red-600'}`}>
                     {isUp ? '+' : ''}₹{Math.abs(item.change).toFixed(2)}
+                  </div>
+                )}
+                {!hasPrice && (
+                  <div className="text-xs text-gray-400">
+                    API credentials required for real-time data
                   </div>
                 )}
               </div>

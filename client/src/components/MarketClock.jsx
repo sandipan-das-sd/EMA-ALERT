@@ -25,7 +25,7 @@ function formatISTDate(date) {
   }
 }
 
-export default function MarketClock({ exchange = 'NSE', compact = false }) {
+export default function MarketClock({ exchange = 'NSE', compact = false, fullWidth = false }) {
   const [now, setNow] = useState(new Date());
   const [status, setStatus] = useState({ exchange, isOpen: null, statusText: 'Loading…' });
   const [error, setError] = useState('');
@@ -100,6 +100,28 @@ export default function MarketClock({ exchange = 'NSE', compact = false }) {
       <div className="flex items-center gap-3">
         <div className={`text-xs px-2 py-1 rounded border ${pillColor}`}>Market: {pillText}</div>
         <div className="text-xs text-slate-600">{exchange} • {time}</div>
+      </div>
+    );
+  }
+
+  if (fullWidth) {
+    return (
+      <div className="w-full mb-6 p-6 border rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div>
+              <div className="text-sm text-slate-600 font-medium">{exchange} Market</div>
+              <div className="text-3xl font-bold tabular-nums text-slate-800">{time} IST</div>
+              <div className="text-sm text-slate-500 mt-1">{dateStr}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className={`text-lg px-4 py-2 rounded-full border-2 font-semibold ${pillColor}`}>
+              {pillText}
+            </div>
+            {error && <div className="text-sm text-rose-600 font-medium">{error}</div>}
+          </div>
+        </div>
       </div>
     );
   }

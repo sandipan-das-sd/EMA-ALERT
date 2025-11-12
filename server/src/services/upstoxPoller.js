@@ -60,6 +60,12 @@ export function startUpstoxPoller({
         const seps = ['|', ':'];
         const vals = [val, val?.toUpperCase?.(), val?.toLowerCase?.()].filter(Boolean);
         const segs = [seg, seg?.toUpperCase?.(), seg?.toLowerCase?.()].filter(Boolean);
+        
+        // For FO instruments, also try without segment prefix (just the token)
+        if (seg && (seg.includes('FO') || seg.includes('_FO'))) {
+          variants.add(val); // Just the numeric token
+        }
+        
         for (const s of seps) {
           for (const sg of segs) {
             for (const v of vals) {
@@ -75,15 +81,79 @@ export function startUpstoxPoller({
         let q;
         for (const v of variants) { if (merged[v]) { q = merged[v]; break; } }
         
-        // If ISIN-based key didn't match, try symbol-based format
+        // If ISIN-based key didn't match, try symbol-based format  
         if (!q && key.includes('INE')) {
-          // Extract symbol from universe mapping and try NSE_EQ:SYMBOL format
+          // Extract symbol from universe mapping and try different segment formats
           const symbol = universeMapping[key];
           if (symbol) {
-            const symbolKey = `NSE_EQ:${symbol}`;
-            q = merged[symbolKey];
-            if (q && process.env.DEBUG_UPSTOX) {
-              console.log(`[Poller] ISIN->Symbol mapping: ${key} -> ${symbolKey} = ₹${q.last_price}`);
+            // Try multiple segment formats for EQ instruments
+            const segmentVariants = [`NSE_EQ:${symbol}`, `BSE_EQ:${symbol}`];
+            for (const variant of segmentVariants) {
+              q = merged[variant] || merged[variant.replace(':', '|')];
+              if (q) {
+                if (process.env.DEBUG_UPSTOX) {
+                  console.log(`[Poller] ISIN->Symbol mapping: ${key} -> ${variant} = ₹${q.last_price}`);
+                }
+                break;
+              }
+            }
+          }
+        }
+        
+        // Handle FO instruments with custom key formats
+        if (!q && (key.includes('NSE_FO') || key.includes('BSE_FO'))) {
+          // FO instruments use format: NSE_FO|TOKEN or BSE_FO|TOKEN
+          // Based on official docs:
+          // NSE: NSE_FO|36708 (both index and equity options)
+          // BSE: BSE_FO|1101620 (index options) 
+          
+          const parts = key.split(/[\|:]/);
+          if (parts.length >= 2) {
+            const segment = parts[0];
+            const token = parts[1];
+            
+            // Try the exact format from docs
+            const exactVariants = [
+              `${segment}|${token}`,
+              `${segment}:${token}`,
+              token // Just the token number
+            ];
+            
+            for (const variant of exactVariants) {
+              q = merged[variant];
+              if (q) {
+                if (process.env.DEBUG_UPSTOX) {
+                  console.log(`[Poller] FO exact format match: ${key} -> ${variant} = ₹${q.last_price}`);
+                }
+                break;
+              }
+            }
+            
+            // If still no match, try to get the trading symbol from instrument search service
+            if (!q) {
+              try {
+                const instrument = instrumentsSearchService?.getInstrument?.(key);
+                if (instrument && instrument.tradingSymbol) {
+                  const tradingSymbol = instrument.tradingSymbol;
+                  const symbolVariants = [
+                    tradingSymbol,
+                    `${segment}:${tradingSymbol}`,
+                    `${segment}|${tradingSymbol}`
+                  ];
+                  
+                  for (const variant of symbolVariants) {
+                    q = merged[variant];
+                    if (q) {
+                      if (process.env.DEBUG_UPSTOX) {
+                        console.log(`[Poller] FO trading symbol match: ${key} -> ${variant} = ₹${q.last_price}`);
+                      }
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                // Ignore errors in instrument lookup
+              }
             }
           }
         }
@@ -91,6 +161,10 @@ export function startUpstoxPoller({
         if (!q) {
           if (process.env.DEBUG_UPSTOX && !key.includes('INDEX')) {
             console.log(`[Poller] No price found for ${key}, tried variants:`, variants.slice(0, 3));
+            // Log if it's a FO instrument to help debug
+            if (key.includes('FO') || key.includes('FUT') || key.includes('CE') || key.includes('PE')) {
+              console.log(`[Poller] FO instrument ${key} not found. Available response keys:`, Object.keys(merged).filter(k => k.includes('FO') || /\d{6,}/.test(k)).slice(0, 10));
+            }
           }
           return { key, missing: true };
         }

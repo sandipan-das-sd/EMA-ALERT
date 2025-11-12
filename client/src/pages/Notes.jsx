@@ -1,24 +1,65 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getNotes, createNote, updateNote, deleteNote, searchNotes } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
-import MarketClock from '../components/MarketClock.jsx';
 
 export default function Notes() {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     tags: ''
   });
 
+  // Debounced search effect
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      try {
+        const results = await searchNotes(searchQuery);
+        setSearchResults(results);
+      } catch (error) {
+        console.error('Error searching notes:', error);
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
   // Load notes on component mount
   useEffect(() => {
     loadNotes();
   }, []);
+
+  // handle modal enter animation
+  useEffect(() => {
+    let t;
+    if (showForm) {
+      // mount then animate
+      t = setTimeout(() => setModalVisible(true), 15);
+    } else {
+      setModalVisible(false);
+    }
+    return () => clearTimeout(t);
+  }, [showForm]);
+
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      handleSearch();
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
 
   const loadNotes = async () => {
     try {
@@ -32,7 +73,7 @@ export default function Notes() {
     }
   };
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     if (!searchQuery.trim()) {
       loadNotes();
       return;
@@ -43,7 +84,7 @@ export default function Notes() {
     } catch (error) {
       console.error('Error searching notes:', error);
     }
-  };
+  }, [searchQuery]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -58,7 +99,9 @@ export default function Notes() {
       }
       
       setFormData({ title: '', content: '', tags: '' });
-      setShowForm(false);
+        // animate close
+        setModalVisible(false);
+        setTimeout(() => setShowForm(false), 180);
       setEditingNote(null);
       loadNotes();
     } catch (error) {
@@ -88,8 +131,14 @@ export default function Notes() {
 
   const cancelForm = () => {
     setFormData({ title: '', content: '', tags: '' });
-    setShowForm(false);
+    setModalVisible(false);
+    setTimeout(() => setShowForm(false), 180);
     setEditingNote(null);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setSearchResults(null);
   };
 
   const formatDate = (dateString) => {
@@ -109,7 +158,6 @@ export default function Notes() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Trading Notes</h1>
           <div className="flex items-center gap-4">
-            <MarketClock mode="compact" />
             <button 
               onClick={() => setShowForm(true)}
               className="btn-primary"
@@ -128,17 +176,15 @@ export default function Notes() {
               className="input flex-1"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
-            <button onClick={handleSearch} className="btn-primary">Search</button>
-            <button onClick={loadNotes} className="btn-secondary">Clear</button>
+            <button onClick={clearSearch} className="btn-secondary">Clear</button>
           </div>
         </div>
 
         {/* Note Form Modal */}
         {showForm && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+            <div className={`bg-white rounded-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto transform transition-all duration-150 ${modalVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
               <h2 className="text-xl font-semibold mb-4">
                 {editingNote ? 'Edit Note' : 'Create New Note'}
               </h2>
@@ -193,7 +239,7 @@ export default function Notes() {
           <div className="text-center py-8">
             <div className="text-gray-500">Loading notes...</div>
           </div>
-        ) : notes.length === 0 ? (
+        ) : (searchResults || notes).length === 0 ? (
           <div className="text-center py-12">
             <div className="text-gray-500 mb-4">
               {searchQuery ? 'No notes found matching your search.' : 'No notes yet. Create your first trading note!'}
@@ -206,8 +252,11 @@ export default function Notes() {
           </div>
         ) : (
           <div className="grid gap-4">
-            {notes.map((note) => (
-              <div key={note._id} className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition">
+            {(searchResults || notes).map((note, idx) => (
+              <div
+                key={note._id}
+                className="border rounded-xl p-4 bg-white shadow-sm hover:shadow-lg transition transform hover:-translate-y-1"
+              >
                 <div className="flex items-start justify-between mb-2">
                   <h3 className="font-semibold text-lg">{note.title}</h3>
                   <div className="flex gap-2">
@@ -225,13 +274,13 @@ export default function Notes() {
                     </button>
                   </div>
                 </div>
-                
+
                 <div className="prose prose-sm max-w-none mb-3">
                   <div className="whitespace-pre-wrap text-gray-700">
                     {note.content}
                   </div>
                 </div>
-                
+
                 {note.tags && note.tags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-3">
                     {note.tags.map((tag, index) => (
@@ -244,7 +293,7 @@ export default function Notes() {
                     ))}
                   </div>
                 )}
-                
+
                 <div className="flex justify-between text-xs text-gray-500">
                   <span>Created: {formatDate(note.createdAt)}</span>
                   {note.updatedAt !== note.createdAt && (

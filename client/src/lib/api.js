@@ -102,3 +102,25 @@ export async function searchNotes(query) {
   const data = await request(`/api/notes/search?q=${encodeURIComponent(query)}`);
   return data.notes || [];
 }
+
+// Instruments search
+export async function searchInstruments(query, options = {}) {
+  const { segments, limit = 50 } = options;
+  const params = new URLSearchParams({ q: query, limit: limit.toString() });
+  
+  if (segments && segments.length > 0) {
+    params.set('segments', segments.join(','));
+  }
+  
+  const data = await request(`/api/instruments/search?${params.toString()}`);
+  return data.results || [];
+}
+
+export async function getInstrument(instrumentKey) {
+  const data = await request(`/api/instruments/${encodeURIComponent(instrumentKey)}`);
+  return data.instrument || null;
+}
+
+export async function getInstrumentsStats() {
+  return await request('/api/instruments/stats');
+}

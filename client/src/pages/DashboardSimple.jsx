@@ -1,22 +1,129 @@
 import React, { useEffect, useState } from 'react';
-import { logout, addToWatchlist } from '../lib/api.js';
+import { logout, addToWatchlist, API_URL } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
 import MarketClock from '../components/MarketClock.jsx';
 import InstrumentSearch from '../components/InstrumentSearch.jsx';
-import { usePrices } from '../contexts/PriceContext.jsx';
 
 export default function Dashboard({ user, setUser }) {
-  const { ticks, indices, universe, polling, connected } = usePrices();
-  const [adding, setAdding] = useState({}); // instrumentKey -> boolean
+  const [indices, setIndices] = useState([]); 
+  const [ticks, setTicks] = useState({});
+  const [adding, setAdding] = useState({});
   const [nifty, setNifty] = useState({ ltp: null, ts: null, error: '' });
+  const [wsFailed, setWsFailed] = useState(false);
+  const [polling, setPolling] = useState(false);
+  const [universe, setUniverse] = useState([]);
 
-  // Update Nifty from indices data
   useEffect(() => {
-    const niftyIndex = indices.find(i => i.key === 'NSE_INDEX|Nifty 50');
-    if (niftyIndex && typeof niftyIndex.ltp === 'number') {
-      setNifty({ ltp: niftyIndex.ltp, ts: Date.now(), error: '' });
+    // Load instrument universe from server
+    fetch(`${API_URL}/api/market/universe`).then(r => r.json()).then(data => {
+      setUniverse(data?.data || []);
+    }).catch(()=>{});
+
+    // Start WebSocket connection
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${window.location.hostname}:4000/ws/ticker`;
+    const ws = new WebSocket(url);
+    
+    const failSafe = setTimeout(() => {
+      setWsFailed(true);
+    }, 5000);
+    
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        switch (msg.type) {
+          case 'tick':
+            if (msg.instrumentKey === 'NSE_INDEX|Nifty 50') {
+              setNifty({ ltp: msg.ltp, ts: msg.ts, error: '' });
+            }
+            setTicks(prev => ({ 
+              ...prev, 
+              [msg.instrumentKey]: { 
+                ltp: msg.ltp, 
+                ts: msg.ts,
+                changePct: msg.changePct,
+                change: msg.change
+              } 
+            }));
+            clearTimeout(failSafe);
+            break;
+          case 'indices':
+            setIndices(msg.data || []);
+            const niftyIndex = (msg.data || []).find(i => i.key === 'NSE_INDEX|Nifty 50');
+            if (niftyIndex && typeof niftyIndex.ltp === 'number') {
+              setNifty({ ltp: niftyIndex.ltp, ts: Date.now(), error: '' });
+              clearTimeout(failSafe);
+            }
+            break;
+          case 'quotes':
+            const map = {};
+            (msg.data || []).forEach(q => {
+              if (typeof q.ltp === 'number') {
+                map[q.key] = { 
+                  ltp: q.ltp, 
+                  ts: q.ts, 
+                  changePct: q.changePct,
+                  change: q.change || (q.ltp && q.cp ? q.ltp - q.cp : null)
+                };
+              }
+            });
+            setTicks(prev => ({ ...prev, ...map }));
+            break;
+          case 'error':
+            setNifty((s) => ({ ...s, error: msg.message }));
+            break;
+        }
+      } catch (e) {
+        console.error('WebSocket parse error:', e);
+      }
+    };
+    
+    ws.onerror = () => {
+      setNifty((s) => ({ ...s, error: 'Feed connection error' }));
+      setWsFailed(true);
+    };
+    
+    return () => {
+      clearTimeout(failSafe);
+      ws.close();
+    };
+  }, []);
+
+  // REST poll fallback if WS fails
+  useEffect(() => {
+    if (!wsFailed || polling) return;
+    setPolling(true);
+    let cancelled = false;
+    
+    async function pollOnce() {
+      try {
+        const res = await fetch(`${API_URL}/api/market/nifty`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.tick?.ltp) {
+            if (!cancelled) setNifty({ ltp: data.tick.ltp, ts: data.tick.ts, error: '' });
+          }
+        }
+      } catch (e) {
+        console.error('Polling error:', e);
+      }
     }
-  }, [indices]);
+    
+    const tick = async () => {
+      if (cancelled) return;
+      await pollOnce();
+      if (cancelled) return;
+      setTimeout(tick, 6000);
+    };
+    
+    tick();
+    
+    return () => { 
+      cancelled = true; 
+      setPolling(false); 
+    };
+  }, [wsFailed]);
+
   async function onLogout() {
     await logout();
     setUser(null);
@@ -27,12 +134,11 @@ export default function Dashboard({ user, setUser }) {
     setAdding(a => ({ ...a, [key]: true }));
     try {
       const updated = await addToWatchlist(key);
-      // update local user watchlist if server returned it
       if (updated && Array.isArray(updated)) {
         setUser(u => ({ ...u, watchlist: updated }));
       }
     } catch (e) {
-      // Could toast error; keep silent for now
+      console.error('Add to watchlist error:', e);
     } finally {
       setAdding(a => ({ ...a, [key]: false }));
     }
@@ -41,7 +147,7 @@ export default function Dashboard({ user, setUser }) {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-  <main className="flex-1 p-8 lg:p-10">
+      <main className="flex-1 p-8 lg:p-10">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-semibold">Welcome {user?.name}</h1>
           <div className="flex items-center gap-4">
@@ -49,12 +155,14 @@ export default function Dashboard({ user, setUser }) {
             <button className="btn-primary" onClick={onLogout}>Log out</button>
           </div>
         </div>
+
         <div className="mb-6">
           <MarketClock exchange="NSE" fullWidth />
         </div>
+
         <div className="mb-6 flex items-center justify-end">
           <div className="flex items-center gap-4 text-sm">
-            {connected ? (
+            {!wsFailed ? (
               <span className="text-green-600 flex items-center gap-1">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 Live Feed Active
@@ -66,6 +174,7 @@ export default function Dashboard({ user, setUser }) {
             )}
           </div>
         </div>
+
         {/* Indices strip */}
         <div className="mb-6 space-y-2">
           <div className="flex flex-wrap gap-6">
@@ -109,7 +218,7 @@ export default function Dashboard({ user, setUser }) {
           </div>
         </div>
 
-        {/* Instrument universe with live ticks */}
+        {/* Popular Scrips with live ticks */}
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-4">Popular Scrips</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -128,20 +237,20 @@ export default function Dashboard({ user, setUser }) {
                       <div className="text-sm font-semibold tracking-wide" title={item.underlying}>{item.symbol}</div>
                       <div className="text-xs text-slate-500 max-w-[220px] truncate" title={item.underlying}>{item.underlying}</div>
                     </div>
-                      {user?.watchlist && user.watchlist.includes(key) ? (
-                        <div className="flex items-center gap-2 text-sm text-green-700 font-medium">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Added</span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleAdd(key)}
-                          className="text-xs px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-50 hover:bg-blue-700"
-                          disabled={adding[key]}
-                        >{adding[key] ? 'Adding…' : 'Add'}</button>
-                      )}
+                    {user?.watchlist && user.watchlist.includes(key) ? (
+                      <div className="flex items-center gap-2 text-sm text-green-700 font-medium">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Added</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleAdd(key)}
+                        className="text-xs px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-50 hover:bg-blue-700"
+                        disabled={adding[key]}
+                      >{adding[key] ? 'Adding…' : 'Add'}</button>
+                    )}
                   </div>
                   <div className="flex items-baseline gap-3">
                     <div className={`text-xl font-semibold tabular-nums ${
@@ -168,7 +277,11 @@ export default function Dashboard({ user, setUser }) {
           </div>
         </div>
 
-        {/* Gainers/Losers removed per request */}
+        {universe.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            Loading popular scrips...
+          </div>
+        )}
       </main>
     </div>
   );
