@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import EventEmitter from 'events';
+import { resolveFOInstrumentKey } from './instruments.js';
 
 export function startUpstoxPoller({
   accessToken,
@@ -7,7 +8,8 @@ export function startUpstoxPoller({
   instrumentKeys,
   intervalMs = 2000,
   batchSize = 50,
-  universeMapping = {}
+  universeMapping = {},
+  instrumentsSearchService
 }) {
   const emitter = new EventEmitter();
   let stopped = false;
@@ -100,60 +102,119 @@ export function startUpstoxPoller({
           }
         }
         
-        // Handle FO instruments with custom key formats
+        // Handle FO instruments with enhanced key resolution
         if (!q && (key.includes('NSE_FO') || key.includes('BSE_FO'))) {
-          // FO instruments use format: NSE_FO|TOKEN or BSE_FO|TOKEN
-          // Based on official docs:
-          // NSE: NSE_FO|36708 (both index and equity options)
-          // BSE: BSE_FO|1101620 (index options) 
-          
-          const parts = key.split(/[\|:]/);
-          if (parts.length >= 2) {
-            const segment = parts[0];
-            const token = parts[1];
-            
-            // Try the exact format from docs
-            const exactVariants = [
-              `${segment}|${token}`,
-              `${segment}:${token}`,
-              token // Just the token number
-            ];
-            
-            for (const variant of exactVariants) {
-              q = merged[variant];
-              if (q) {
-                if (process.env.DEBUG_UPSTOX) {
-                  console.log(`[Poller] FO exact format match: ${key} -> ${variant} = ₹${q.last_price}`);
-                }
-                break;
-              }
-            }
-            
-            // If still no match, try to get the trading symbol from instrument search service
-            if (!q) {
-              try {
-                const instrument = instrumentsSearchService?.getInstrument?.(key);
-                if (instrument && instrument.tradingSymbol) {
-                  const tradingSymbol = instrument.tradingSymbol;
-                  const symbolVariants = [
-                    tradingSymbol,
-                    `${segment}:${tradingSymbol}`,
-                    `${segment}|${tradingSymbol}`
-                  ];
-                  
-                  for (const variant of symbolVariants) {
-                    q = merged[variant];
-                    if (q) {
-                      if (process.env.DEBUG_UPSTOX) {
-                        console.log(`[Poller] FO trading symbol match: ${key} -> ${variant} = ₹${q.last_price}`);
-                      }
-                      break;
+          try {
+            const parts = key.split(/[\|:]/);
+            if (parts.length >= 2) {
+              const segment = parts[0];
+              const token = parts[1];
+              
+              // Get instrument details from search service for better matching
+              const instrument = instrumentsSearchService?.getInstrument?.(key);
+              
+              if (instrument && instrument.tradingSymbol) {
+                const tradingSymbol = instrument.tradingSymbol;
+                // Build normalized FO symbol variants expected by Upstox response map
+                const buildFOSymbolVariants = (inst) => {
+                  // Collect multiple possible underlying codes (handle hyphens, ampersands, dots)
+                  const tsToken = (inst.tradingSymbol || '').split(' ')[0]?.toUpperCase?.() || '';
+                  const snToken = (inst.shortName || inst.name || '').split(' ')[0]?.toUpperCase?.() || '';
+                  const normalize = (s) => (s || '').toUpperCase();
+                  const stripNonAlnum = (s) => normalize(s).replace(/[^A-Z0-9]/g, '');
+                  const candidates = new Set([
+                    tsToken,
+                    stripNonAlnum(tsToken),
+                    snToken,
+                    stripNonAlnum(snToken)
+                  ]);
+                  // Special case: replace '&' with 'AND' (e.g., M&M -> MM, also try MANDM)
+                  if (tsToken.includes('&')) {
+                    candidates.add(tsToken.replace(/&/g, 'AND'));
+                    candidates.add(stripNonAlnum(tsToken.replace(/&/g, 'AND')));
+                  }
+                  // Also try removing common punctuation
+                  candidates.add(tsToken.replace(/[-.&]/g, ''));
+                  const underList = Array.from(candidates).filter(Boolean);
+                  const isFut = /FUT/i.test(inst.tradingSymbol) || /FUT/.test(inst.instrumentType || inst.instrument_type || '');
+                  const opt = (inst.optionType || inst.option_type || (inst.tradingSymbol?.toUpperCase().includes('PE') ? 'PE' : 'CE')).toUpperCase();
+                  const strikeRaw = inst.strike ?? inst.strike_price ?? Number(inst.tradingSymbol?.match(/\b(\d+(?:\.\d+)?)\b/)?.[1] || 0);
+                  const strike = (typeof strikeRaw === 'number' ? strikeRaw : Number(strikeRaw || 0));
+                  const monNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                  let dt = null; try { dt = new Date(Number(inst.expiry) || 0); } catch {}
+                  const yy = dt ? String(dt.getFullYear()).slice(-2) : '';
+                  const mon = dt ? monNames[dt.getMonth()] : '';
+                  const dd = dt ? String(dt.getDate()).padStart(2, '0') : '';
+                  const mon1 = dt ? mon.charAt(0) : '';
+                  const noSpaceTS = inst.tradingSymbol.replace(/\s+/g,'').toUpperCase();
+                  const variants = new Set([noSpaceTS]);
+                  for (const under of underList) {
+                    const ym = `${under}${yy}${mon}`;            // e.g., NIFTY25NOV
+                    const ymd = `${under}${yy}${mon}${dd}`;       // e.g., NIFTY25NOV18
+                    const ym1 = `${under}${yy}${mon1}`;           // e.g., NIFTY25N
+                    const ymd1 = `${under}${yy}${mon1}${dd}`;     // e.g., NIFTY25N18
+                    if (isFut) {
+                      variants.add(`${ym}FUT`);
+                      variants.add(`${ym1}FUT`);
+                    } else {
+                      // Options: include with and without day
+                      const s = String(strike).replace(/\.0+$/,'');
+                      variants.add(`${ym}${s}${opt}`);
+                      if (dd) variants.add(`${ymd}${s}${opt}`);
+                      variants.add(`${ym1}${s}${opt}`);
+                      if (dd) variants.add(`${ymd1}${s}${opt}`);
                     }
                   }
+                  return Array.from(variants).filter(Boolean);
+                };
+                const foSymbols = buildFOSymbolVariants(instrument);
+                
+                // Try multiple variations of the key format
+                // The API often returns data with segment:trading_symbol format for FO
+                const allVariants = [
+                  `${segment}:${tradingSymbol}`,
+                  `${segment}|${tradingSymbol}`,
+                  tradingSymbol,
+                  `${segment}:${token}`,
+                  `${segment}|${token}`,
+                  token,
+                  // Normalized symbol variants
+                  ...foSymbols.map(sym => `${segment}:${sym}`),
+                  ...foSymbols.map(sym => `${segment}|${sym}`),
+                  ...foSymbols
+                ];
+                
+                for (const variant of allVariants) {
+                  q = merged[variant];
+                  if (q) {
+                    if (process.env.DEBUG_UPSTOX) {
+                      console.log(`[Poller] FO variant match: ${key} -> ${variant} = ₹${q.last_price}`);
+                    }
+                    break;
+                  }
                 }
-              } catch (e) {
-                // Ignore errors in instrument lookup
+              } else {
+                // Fallback to simpler matching when instrument details are unavailable
+                const simpleVariants = [
+                  `${segment}:${token}`,
+                  `${segment}|${token}`,
+                  token
+                ];
+                
+                for (const variant of simpleVariants) {
+                  q = merged[variant];
+                  if (q) {
+                    if (process.env.DEBUG_UPSTOX) {
+                      console.log(`[Poller] FO simple match: ${key} -> ${variant} = ₹${q.last_price}`);
+                    }
+                    break;
+                  }
+                }
               }
+            }
+          } catch (e) {
+            if (process.env.DEBUG_UPSTOX) {
+              console.warn(`[Poller] FO key resolution error for ${key}:`, e.message);
             }
           }
         }

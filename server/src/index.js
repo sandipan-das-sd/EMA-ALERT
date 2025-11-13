@@ -225,15 +225,76 @@ async function start() {
         console.log('[Upstox] First 10 subscription keys:', uniqueKeys.slice(0,10));
         console.log('[Upstox] Sample key format check:', uniqueKeys[0]);
       }
-      // Create mapping from symbol keys back to original ISIN keys for WebSocket events
-      const symbolToOriginalKey = {};
-      resolvedUniverse.forEach(item => {
-        if (item.symbol) {
-          symbolToOriginalKey[`NSE_EQ:${item.symbol}`] = item.instrumentKey;
-        }
-      });
+        // Create mapping from symbol keys back to original keys for WebSocket events (EQ + FO)
+        const symbolToOriginalKey = {};
+        resolvedUniverse.forEach(item => {
+          if (item.symbol) {
+            symbolToOriginalKey[`NSE_EQ:${item.symbol}`] = item.instrumentKey;
+            symbolToOriginalKey[`NSE_EQ|${item.symbol}`] = item.instrumentKey;
+          }
+        });
+        try {
+          const monNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+          const foVariants = (inst) => {
+            const tsToken = (inst.tradingSymbol || '').split(' ')[0]?.toUpperCase?.() || '';
+            const snToken = (inst.shortName || inst.name || '').split(' ')[0]?.toUpperCase?.() || '';
+            const stripNonAlnum = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const underList = new Set([
+              tsToken,
+              stripNonAlnum(tsToken),
+              snToken,
+              stripNonAlnum(snToken),
+              tsToken.replace(/[-.&]/g, '')
+            ]);
+            if (tsToken.includes('&')) {
+              underList.add(tsToken.replace(/&/g, 'AND'));
+              underList.add(stripNonAlnum(tsToken.replace(/&/g, 'AND')));
+            }
+            const isFut = /FUT/i.test(inst.tradingSymbol) || /FUT/.test(inst.instrumentType || inst.instrument_type || '');
+            const opt = (inst.optionType || inst.option_type || (inst.tradingSymbol?.toUpperCase().includes('PE') ? 'PE' : 'CE')).toUpperCase();
+            const strikeRaw = inst.strike ?? inst.strike_price ?? Number(inst.tradingSymbol?.match(/\b(\d+(?:\.\d+)?)\b/)?.[1] || 0);
+            const strike = (typeof strikeRaw === 'number' ? strikeRaw : Number(strikeRaw || 0));
+            let dt = null; try { dt = new Date(Number(inst.expiry) || 0); } catch {}
+            const yy = dt ? String(dt.getFullYear()).slice(-2) : '';
+            const mon = dt ? monNames[dt.getMonth()] : '';
+            const dd = dt ? String(dt.getDate()).padStart(2,'0') : '';
+            const mon1 = dt ? mon.charAt(0) : '';
+            const noSpace = inst.tradingSymbol.replace(/\s+/g,'').toUpperCase();
+            const set = new Set([noSpace]);
+            for (const under of underList) {
+              const ym = `${under}${yy}${mon}`;
+              const ymd = `${under}${yy}${mon}${dd}`;
+              const ym1 = `${under}${yy}${mon1}`;
+              const ymd1 = `${under}${yy}${mon1}${dd}`;
+              if (isFut) {
+                set.add(`${ym}FUT`);
+                set.add(`${ym1}FUT`);
+              } else {
+                const s = String(strike).replace(/\.0+$/,'');
+                set.add(`${ym}${s}${opt}`);
+                if (dd) set.add(`${ymd}${s}${opt}`);
+                set.add(`${ym1}${s}${opt}`);
+                if (dd) set.add(`${ymd1}${s}${opt}`);
+              }
+            }
+            return Array.from(set);
+          };
+          for (const orig of currentSubscriptionKeys) {
+            const inst = instrumentsSearchService.getInstrument(orig);
+            if (inst && inst.tradingSymbol && inst.segment) {
+              const variants = foVariants(inst);
+              variants.forEach(v => {
+                symbolToOriginalKey[`${inst.segment}:${v}`] = orig;
+                symbolToOriginalKey[`${inst.segment}|${v}`] = orig;
+              });
+              // also raw
+              symbolToOriginalKey[`${inst.segment}:${inst.tradingSymbol}`] = orig;
+              symbolToOriginalKey[`${inst.segment}|${inst.tradingSymbol}`] = orig;
+            }
+          }
+        } catch {}
 
-      feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: uniqueKeys, mode });
+  feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: uniqueKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
       feed.on('ready', () => {
         feedReady = true;
         console.log('Upstox market feed connected');
@@ -291,7 +352,8 @@ async function start() {
         instrumentKeys: currentSubscriptionKeys,
         intervalMs: pollIntervalMs,
         batchSize: Number(process.env.UPSTOX_LTP_BATCH) || 50,
-        universeMapping: buildUniverseMapping()
+        universeMapping: buildUniverseMapping(),
+        instrumentsSearchService
       });
       poller.on('quotes', (quotes) => {
         console.log(`[Poller] Received ${quotes.length} quotes, ${quotes.filter(q => !q.missing).length} with prices`);
@@ -374,7 +436,7 @@ async function start() {
             }
           } catch (e) { console.warn('[DynamicSub] Error closing old feed:', e.message); }
 
-          feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: finalKeys, mode });
+          feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: finalKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
           feed.on('ready', () => {
             feedReady = true;
             console.log('Upstox market feed connected (dynamic update)');
@@ -412,7 +474,8 @@ async function start() {
             instrumentKeys: allKeys,
             intervalMs: pollIntervalMs,
             batchSize: Number(process.env.UPSTOX_LTP_BATCH) || 50,
-            universeMapping: buildUniverseMapping()
+            universeMapping: buildUniverseMapping(),
+            instrumentsSearchService
           });
           poller.on('quotes', (quotes) => {
             console.log(`[Poller] (dynamic) Received ${quotes.length} quotes, ${quotes.filter(q => !q.missing).length} with prices`);
@@ -460,9 +523,29 @@ async function start() {
 
     // Generic LTP REST fallback using Upstox market quote endpoint
     app.get('/api/market/ltp', async (req, res) => {
+      // Support batch mode: /api/market/ltp?keys=a,b,c
+      const batchKeysParam = req.query.keys;
       const instrument = req.query.instrument || indexKeys[0];
       if (!accessToken) return res.status(400).json({ message: 'Access token missing' });
       try {
+        // Batch mode handler for client fallback
+        if (batchKeysParam) {
+          const keys = String(batchKeysParam).split(',').map(s => s.trim()).filter(Boolean);
+          if (!keys.length) return res.json({ data: {} });
+          // Fetch in manageable batches
+          const chunk = (arr, size) => arr.reduce((acc, _, i) => (i % size ? acc : [...acc, arr.slice(i, i + size)]), []);
+          const batches = chunk(keys, Number(process.env.UPSTOX_LTP_BATCH) || 50);
+          const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+          const responses = await Promise.all(batches.map(async group => {
+            const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(group.join(','))}`;
+            const r = await fetch(url, { headers });
+            if (!r.ok) return { data: {} };
+            try { return await r.json(); } catch { return { data: {} }; }
+          }));
+          const merged = responses.reduce((acc, r) => ({ ...acc, ...(r?.data || {}) }), {});
+          return res.json({ data: merged, ts: Date.now() });
+        }
+
         // If a plain symbol was passed, attempt to map via master
         const isPlainSymbol = instrument && !String(instrument).includes('|') && !String(instrument).includes(':');
         let candidate = instrument;
@@ -865,6 +948,42 @@ async function start() {
       } catch (e) {
         res.status(500).json({ message: 'Test failed', error: e.message });
       }
+    });
+
+    // Debug route: show normalized FO symbol variants for a given instrumentKey
+    app.get('/api/debug/fo-variants', (req, res) => {
+      const { instrumentKey } = req.query;
+      if (!instrumentKey) return res.status(400).json({ error: 'instrumentKey is required' });
+      const inst = instrumentsSearchService.getInstrument(instrumentKey);
+      if (!inst) return res.status(404).json({ error: 'Instrument not found in local index' });
+      const monNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      const under = (inst.name?.split(' ')[0] || inst.tradingSymbol?.split(' ')[0] || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const isFut = /FUT/i.test(inst.tradingSymbol) || /FUT/.test(inst.instrumentType || inst.instrument_type || '');
+      const opt = (inst.optionType || inst.option_type || (inst.tradingSymbol?.toUpperCase().includes('PE') ? 'PE' : 'CE')).toUpperCase();
+      const strikeRaw = inst.strike ?? inst.strike_price ?? Number(inst.tradingSymbol?.match(/\b(\d+(?:\.\d+)?)\b/)?.[1] || 0);
+      const strike = (typeof strikeRaw === 'number' ? strikeRaw : Number(strikeRaw || 0));
+      let dt = null; try { dt = new Date(Number(inst.expiry) || 0); } catch {}
+      const yy = dt ? String(dt.getFullYear()).slice(-2) : '';
+      const mon = dt ? monNames[dt.getMonth()] : '';
+      const dd = dt ? String(dt.getDate()).padStart(2,'0') : '';
+      const mon1 = dt ? mon.charAt(0) : '';
+      const noSpace = inst.tradingSymbol.replace(/\s+/g,'').toUpperCase();
+      const ym = `${under}${yy}${mon}`;
+      const ymd = `${under}${yy}${mon}${dd}`;
+      const ym1 = `${under}${yy}${mon1}`;
+      const ymd1 = `${under}${yy}${mon1}${dd}`;
+      const s = String(strike).replace(/\.0+$/,'');
+      const variants = new Set([noSpace]);
+      if (isFut) {
+        variants.add(`${ym}FUT`);
+        variants.add(`${ym1}FUT`);
+      } else {
+        variants.add(`${ym}${s}${opt}`);
+        if (dd) variants.add(`${ymd}${s}${opt}`);
+        variants.add(`${ym1}${s}${opt}`);
+        if (dd) variants.add(`${ymd1}${s}${opt}`);
+      }
+      res.json({ instrumentKey, segment: inst.segment, name: inst.name, tradingSymbol: inst.tradingSymbol, expiry: inst.expiry, strike: inst.strike, optionType: inst.optionType, variants: Array.from(variants) });
     });
   } catch (err) {
     console.error('Mongo connection error', err);

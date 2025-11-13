@@ -81,3 +81,28 @@ export async function resolveInstrumentKey({ apiBase, accessToken, symbol, segme
     return null;
   }
 }
+
+// Convert FO instrument key format for market quote API
+// BOD format: NSE_FO|TOKEN -> API format: NSE_FO:TRADING_SYMBOL
+export async function resolveFOInstrumentKey({ apiBase, accessToken, instrumentKey, instrumentsSearchService }) {
+  try {
+    // Extract token from BOD format
+    const parts = instrumentKey.split(/[\|:]/);
+    if (parts.length !== 2) return instrumentKey;
+    
+    const [segment, token] = parts;
+    if (!segment.includes('FO')) return instrumentKey;
+    
+    // Get instrument details from search service
+    const instrument = instrumentsSearchService?.getInstrument?.(instrumentKey);
+    if (!instrument || !instrument.tradingSymbol) {
+      return instrumentKey; // Fallback to original
+    }
+    
+    // For FO instruments, the market quote API expects segment:trading_symbol format
+    return `${segment}:${instrument.tradingSymbol}`;
+  } catch (e) {
+    console.warn('[Instruments] FO key resolution failed:', e.message);
+    return instrumentKey; // Fallback to original
+  }
+}

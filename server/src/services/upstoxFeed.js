@@ -41,12 +41,115 @@ export function createUpstoxFeed({
   accessToken,
   instrumentKeys,
   mode = 'ltpc',
+  instrumentsSearchService = null,
+  separator = 'auto' // '|' or ':' or 'auto'
 }) {
   const emitter = new EventEmitter();
   let ws;
   let closed = false;
   let proto;
   let ready = false;
+  
+  // Decide preferred separator based on input keys when auto
+  function decideSeparator(keys) {
+    if (separator === '|' || separator === ':') return separator;
+    // Auto-detect: prefer the most common separator in provided keys
+    let pipe = 0, colon = 0;
+    for (const k of keys) {
+      if (k.includes('|')) pipe++;
+      if (k.includes(':')) colon++;
+    }
+    if (pipe >= colon) return '|';
+    return ':';
+  }
+
+  // Transform FO keys to the format expected by the WebSocket feed, preserving separator style
+  function transformFOKeys(keys) {
+    const sep = decideSeparator(keys);
+    const transformed = [];
+    const reverseMapping = new Map(); // transformed key -> original key
+    
+    keys.forEach(key => {
+      let transformedKey = key;
+      if ((key.includes('NSE_FO') || key.includes('BSE_FO')) && instrumentsSearchService) {
+        const instrument = instrumentsSearchService.getInstrument?.(key);
+        if (instrument && instrument.tradingSymbol) {
+          const parts = key.split(/[\|:]/);
+          if (parts.length === 2) {
+            const segment = parts[0];
+            // Build normalized FO symbol variants (spaces removed + date permutations)
+            const buildFOSymbolVariants = (inst) => {
+              // Build candidate underlyings from trading symbol first token and name/shortName
+              const tsToken = (inst.tradingSymbol || '').split(' ')[0]?.toUpperCase?.() || '';
+              const snToken = (inst.shortName || inst.name || '').split(' ')[0]?.toUpperCase?.() || '';
+              const normalize = (s) => (s || '').toUpperCase();
+              const stripNonAlnum = (s) => normalize(s).replace(/[^A-Z0-9]/g, '');
+              const candidates = new Set([
+                tsToken,
+                stripNonAlnum(tsToken),
+                snToken,
+                stripNonAlnum(snToken)
+              ]);
+              if (tsToken.includes('&')) {
+                candidates.add(tsToken.replace(/&/g, 'AND'));
+                candidates.add(stripNonAlnum(tsToken.replace(/&/g, 'AND')));
+              }
+              candidates.add(tsToken.replace(/[-.&]/g, ''));
+              const underList = Array.from(candidates).filter(Boolean);
+              const isFut = /FUT/i.test(inst.tradingSymbol) || /FUT/.test(inst.instrumentType || inst.instrument_type || '');
+              const opt = (inst.optionType || inst.option_type || (inst.tradingSymbol?.toUpperCase().includes('PE') ? 'PE' : 'CE')).toUpperCase();
+              const strikeRaw = inst.strike ?? inst.strike_price ?? Number(inst.tradingSymbol?.match(/\b(\d+(?:\.\d+)?)\b/)?.[1] || 0);
+              const strike = (typeof strikeRaw === 'number' ? strikeRaw : Number(strikeRaw || 0));
+              const monNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+              let dt = null; try { dt = new Date(Number(inst.expiry) || 0); } catch {}
+              const yy = dt ? String(dt.getFullYear()).slice(-2) : '';
+              const mon = dt ? monNames[dt.getMonth()] : '';
+              const dd = dt ? String(dt.getDate()).padStart(2,'0') : '';
+              const mon1 = dt ? mon.charAt(0) : '';
+              const noSpaceTS = inst.tradingSymbol.replace(/\s+/g,'').toUpperCase();
+              const variants = new Set([noSpaceTS]);
+              for (const under of underList) {
+                const ym = `${under}${yy}${mon}`;
+                const ymd = `${under}${yy}${mon}${dd}`;
+                const ym1 = `${under}${yy}${mon1}`;
+                const ymd1 = `${under}${yy}${mon1}${dd}`;
+                if (isFut) {
+                  variants.add(`${ym}FUT`);
+                  variants.add(`${ym1}FUT`);
+                } else {
+                  const s = String(strike).replace(/\.0+$/,'');
+                  variants.add(`${ym}${s}${opt}`);
+                  if (dd) variants.add(`${ymd}${s}${opt}`);
+                  variants.add(`${ym1}${s}${opt}`);
+                  if (dd) variants.add(`${ymd1}${s}${opt}`);
+                }
+              }
+              return Array.from(variants).filter(Boolean);
+            };
+            const foVariants = buildFOSymbolVariants(instrument);
+            // Prefer weekly/day-inclusive for options, monthly for futures; else first variant
+            let preferred = foVariants[0] || instrument.tradingSymbol.replace(/\s+/g,'');
+            if (!/FUT/i.test(preferred)) {
+              // Prefer ymd-like, then ym1d-like
+              const ymd3 = foVariants.find(v => /\d{2}[A-Z]{3}\d{2}/.test(v));
+              const ymd1 = foVariants.find(v => /\d{2}[A-Z]{1}\d{2}/.test(v));
+              preferred = ymd3 || ymd1 || preferred;
+            }
+            transformedKey = `${segment}${sep}${preferred}`;
+            // Map all variants back as well to be safe
+            reverseMapping.set(transformedKey, key);
+            foVariants.forEach(v => reverseMapping.set(`${segment}${sep}${v}`, key));
+          }
+        }
+      }
+      transformed.push(transformedKey);
+      if (transformedKey === key) {
+        reverseMapping.set(transformedKey, key);
+      }
+    });
+    
+    return { transformed, reverseMapping };
+  }
 
   async function connect() {
     try {
@@ -56,14 +159,22 @@ export function createUpstoxFeed({
 
       ws.on('open', () => {
         const guid = uuidv4().replace(/-/g, '').slice(0, 20);
+        // Transform FO keys for proper subscription
+        const { transformed: transformedKeys, reverseMapping } = transformFOKeys(instrumentKeys);
+        // Store reverse mapping for later use
+        ws._keyMapping = reverseMapping;
+        
         // Upstox v3 expects snake_case: instrument_keys
-        const sub = { guid, method: 'sub', data: { mode, instrument_keys: instrumentKeys } };
+        const sub = { guid, method: 'sub', data: { mode, instrument_keys: transformedKeys } };
         const jsonPayload = JSON.stringify(sub);
         console.log('[Upstox] WebSocket opened, sending subscription...');
-        console.log(`[Upstox] Subscribing to ${instrumentKeys.length} keys in ${mode} mode`);
+        console.log(`[Upstox] Subscribing to ${transformedKeys.length} keys in ${mode} mode`);
         if (process.env.LOG_UPSTOX_DEBUG) {
           console.log('[Upstox] Subscription payload:', jsonPayload);
-          console.log('[Upstox] First 5 instrument keys:', instrumentKeys.slice(0, 5));
+          console.log('[Upstox] First 5 instrument keys:', transformedKeys.slice(0, 5));
+          if (transformedKeys.length !== instrumentKeys.length || Array.from(reverseMapping.values()).some(orig => transformedKeys.some(trans => trans !== orig))) {
+            console.log('[Upstox] Key transformation applied for FO instruments');
+          }
         }
         try { ws.send(jsonPayload); } catch (e) {
           console.error('[Upstox] JSON subscription send failed:', e.message);
@@ -80,7 +191,8 @@ export function createUpstoxFeed({
             if (reqType) break;
           }
           if (reqType) {
-            const msgObj = reqType.create(sub);
+            const { transformed: transformedKeys } = transformFOKeys(instrumentKeys);
+            const msgObj = reqType.create({ ...sub, data: { mode, instrument_keys: transformedKeys } });
             const bin = reqType.encode(msgObj).finish();
             ws.send(Buffer.from(bin));
             if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] Sent binary subscription frame (length)', bin.length);
@@ -124,13 +236,17 @@ export function createUpstoxFeed({
               console.log('[Upstox] Feed keys received:', Object.keys(msg.feeds));
             }
             Object.entries(msg.feeds).forEach(([key, feedObj]) => {
-              if (instrumentKeys.includes(key) && feedObj.ltpc && typeof feedObj.ltpc.ltp === 'number') {
+              // Map the received key back to the original format for FO instruments
+              const originalKey = ws._keyMapping?.get(key) || key;
+              const isSubscribed = instrumentKeys.includes(originalKey) || instrumentKeys.includes(key);
+              
+              if (isSubscribed && feedObj.ltpc && typeof feedObj.ltpc.ltp === 'number') {
                 const ltp = feedObj.ltpc.ltp;
                 const cp = feedObj.ltpc.cp || feedObj.ltpc.close_price || null;
                 const ts = Number(msg.currentTs || Date.now());
                 
                 const tickData = {
-                  instrumentKey: key,
+                  instrumentKey: originalKey, // Use original key for frontend consistency
                   ltp,
                   ts,
                   changePct: cp && cp > 0 ? ((ltp - cp) / cp) * 100 : null,
@@ -138,8 +254,8 @@ export function createUpstoxFeed({
                 };
                 
                 emitter.emit('price', tickData);
-                if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] Tick', key, ltp);
-              } else if (process.env.LOG_UPSTOX_DEBUG && instrumentKeys.includes(key)) {
+                if (process.env.LOG_UPSTOX_DEBUG) console.log('[Upstox] Tick', key, '->', originalKey, ltp);
+              } else if (process.env.LOG_UPSTOX_DEBUG && isSubscribed) {
                 console.log('[Upstox] Feed received but no valid LTP for', key, ':', JSON.stringify(feedObj).slice(0, 200));
               }
             });
