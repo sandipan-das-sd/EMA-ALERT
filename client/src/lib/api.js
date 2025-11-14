@@ -124,3 +124,18 @@ export async function getInstrument(instrumentKey) {
 export async function getInstrumentsStats() {
   return await request('/api/instruments/stats');
 }
+
+// Alerts APIs
+export async function listAlerts({ status = 'active', since, limit = 50 } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (since) params.set('since', String(since));
+  if (limit) params.set('limit', String(limit));
+  const data = await request(`/api/alerts?${params.toString()}`);
+  return data.alerts || [];
+}
+
+export async function dismissAlert(id) {
+  const data = await request(`/api/alerts/${encodeURIComponent(id)}/dismiss`, { method: 'PATCH' });
+  return data.alert || null;
+}

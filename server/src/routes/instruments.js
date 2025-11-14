@@ -1,6 +1,7 @@
 import express from 'express';
 import { protect } from '../middleware/auth.js';
 import { instrumentsSearchService } from '../services/instrumentsSearch.js';
+import { getCandles15m, calculateEMA } from '../services/instruments.js';
 
 const router = express.Router();
 
@@ -29,6 +30,30 @@ router.get('/search', protect, async (req, res) => {
   } catch (error) {
     console.error('Instrument search error:', error);
     res.status(500).json({ message: 'Search failed' });
+  }
+});
+
+// Debug endpoint for EMA/candle calculation
+router.get('/debug/ema/:instrumentKey', async (req, res) => {
+  try {
+    const instrumentKey = req.params.instrumentKey;
+    // Fetch last 30 candles (for EMA-20)
+    const candles = await getCandles15m(instrumentKey, 30);
+    if (!candles || candles.length < 20) {
+      return res.status(400).json({ error: 'Not enough candle data' });
+    }
+    // Calculate EMA-20
+    const emaArr = calculateEMA(candles.map(c => c.close), 20);
+    // Return candles and EMA array
+    res.json({
+      instrumentKey,
+      candles,
+      ema: emaArr,
+      lastCandle: candles[candles.length - 1],
+      lastEMA: emaArr[emaArr.length - 1]
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

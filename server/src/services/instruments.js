@@ -106,3 +106,43 @@ export async function resolveFOInstrumentKey({ apiBase, accessToken, instrumentK
     return instrumentKey; // Fallback to original
   }
 }
+
+// Fetch last N 15m candles for an instrument (Upstox API v3 or mock)
+export async function getCandles15m(instrumentKey, count = 30) {
+  // Replace with actual Upstox API call if available
+  // For demo, return mock candles
+  const candles = [];
+  const now = Date.now();
+  for (let i = count - 1; i >= 0; i--) {
+    const ts = now - i * 15 * 60 * 1000;
+    const open = 100 + Math.random() * 10;
+    const close = open + (Math.random() - 0.5) * 2;
+    const high = Math.max(open, close) + Math.random();
+    const low = Math.min(open, close) - Math.random();
+    candles.push({
+      timestamp: ts,
+      open: parseFloat(open.toFixed(2)),
+      high: parseFloat(high.toFixed(2)),
+      low: parseFloat(low.toFixed(2)),
+      close: parseFloat(close.toFixed(2)),
+      volume: Math.floor(1000 + Math.random() * 500)
+    });
+  }
+  return candles;
+}
+
+// Calculate EMA for array of closes
+export function calculateEMA(closes, length = 20) {
+  const k = 2 / (length + 1);
+  const emaArr = [];
+  let ema = closes[0];
+  for (let i = 0; i < closes.length; i++) {
+    if (i === 0) {
+      emaArr.push(ema);
+    } else {
+      ema = closes[i] * k + ema * (1 - k);
+      emaArr.push(parseFloat(ema.toFixed(2)));
+    }
+  }
+  return emaArr;
+}

@@ -6,7 +6,9 @@ import Signup from './pages/Signup.jsx';
 import Dashboard from './pages/DashboardSimple.jsx';
 import Watchlist from './pages/Watchlist.jsx';
 import Notes from './pages/Notes.jsx';
+import Notifications from './pages/Notifications.jsx';
 import { getMe } from './lib/api.js';
+import { AlertProvider } from './contexts/AlertContext.jsx';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -37,14 +39,17 @@ export default function App() {
   if (loading) return <div className="p-10 text-center">Loading...</div>;
 
   return (
-    <Routes>
-      <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Landing />} />
-      <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onAuthed={handleAuthed} />} />
-      <Route path="/signup" element={user ? <Navigate to="/dashboard" /> : <Signup onAuthed={handleAuthed} />} />
-      <Route path="/dashboard" element={user ? <Dashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
-      <Route path="/watchlist" element={user ? <Watchlist user={user} setUser={setUser} /> : <Navigate to="/" />} />
-      <Route path="/notes" element={user ? <Notes /> : <Navigate to="/" />} />
-      <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
+    <AlertProvider user={user}>
+      <Routes>
+        <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Landing />} />
+        <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login onAuthed={handleAuthed} />} />
+        <Route path="/signup" element={user ? <Navigate to="/dashboard" /> : <Signup onAuthed={handleAuthed} />} />
+        <Route path="/dashboard" element={user ? <Dashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
+        <Route path="/watchlist" element={user ? <Watchlist user={user} setUser={setUser} /> : <Navigate to="/" />} />
+        <Route path="/notes" element={user ? <Notes /> : <Navigate to="/" />} />
+        <Route path="/notifications" element={user ? <Notifications /> : <Navigate to="/" />} />
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+    </AlertProvider>
   );
 }

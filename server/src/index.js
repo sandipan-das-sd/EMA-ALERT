@@ -10,10 +10,12 @@ import authRouter from './routes/auth.js';
 import watchlistRouter from './routes/watchlist.js';
 import notesRouter from './routes/notes.js';
 import instrumentsRouter from './routes/instruments.js';
+import alertsRouter from './routes/alerts.js';
 import { createUpstoxFeed } from './services/upstoxFeed.js';
 import { startUpstoxPoller } from './services/upstoxPoller.js';
 import { instrumentsSearchService } from './services/instrumentsSearch.js';
 import { dynamicSubscriptionManager } from './services/dynamicSubscription.js';
+import { startAlertEngine } from './services/alertEngine.js';
 import fetch from 'node-fetch';
 import { WebSocketServer } from 'ws';
 import fs from 'fs';
@@ -44,6 +46,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/watchlist', watchlistRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/instruments', instrumentsRouter);
+app.use('/api/alerts', alertsRouter);
 
 const PORT = process.env.PORT || 4000;
 
@@ -500,6 +503,9 @@ async function start() {
     } else {
       console.warn('UPSTOX_ACCESS_TOKEN missing. WS price feed disabled.');
     }
+
+    // Start alert engine in background (independent of WS)
+    startAlertEngine({ apiBase, accessToken, instrumentsSearchService, dynamicSubscriptionManager, intervalMs: 60_000 });
 
     wss.on('connection', (socket) => {
       socket.send(JSON.stringify({ type: 'info', message: 'Connected to EMA-ALERT ticker' }));

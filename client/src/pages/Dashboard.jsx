@@ -3,12 +3,16 @@ import { logout, addToWatchlist } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
 import MarketClock from '../components/MarketClock.jsx';
 import InstrumentSearch from '../components/InstrumentSearch.jsx';
+import { EMADebugLogger } from '../components/EMADebugLogger.jsx';
 import { usePrices } from '../contexts/PriceContext.jsx';
+import TradingViewModal from '../components/TradingViewModal.jsx';
+import { convertToTradingViewSymbol, getInstrumentDisplayName } from '../lib/tradingview.js';
 
 export default function Dashboard({ user, setUser }) {
   const { ticks, indices, universe, polling, connected } = usePrices();
   const [adding, setAdding] = useState({}); // instrumentKey -> boolean
   const [nifty, setNifty] = useState({ ltp: null, ts: null, error: '' });
+  const [chartModal, setChartModal] = useState({ isOpen: false, symbol: '', name: '' });
 
   // Update Nifty from indices data
   useEffect(() => {
@@ -38,17 +42,60 @@ export default function Dashboard({ user, setUser }) {
     }
   }
 
+  function openChart(item) {
+    const key = item.instrumentKey || `${item.segment}|${item.symbol}`;
+    console.log('[Dashboard] Opening chart for item:', item);
+    
+    // Extract the actual trading symbol from the item
+    // Priority: symbol > tradingSymbol > underlying
+    const actualSymbol = item.symbol || item.tradingSymbol || '';
+    
+    const tvSymbol = convertToTradingViewSymbol(key, actualSymbol, item.underlying);
+    const name = getInstrumentDisplayName(item);
+    
+    console.log('[Dashboard] TradingView symbol:', tvSymbol, 'Name:', name);
+    setChartModal({ isOpen: true, symbol: tvSymbol, name });
+  }
+
+  function closeChart() {
+    setChartModal({ isOpen: false, symbol: '', name: '' });
+  }
+
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-  <main className="flex-1 p-8 lg:p-10">
-        <div className="flex items-center justify-between mb-6">
+      <main className="flex-1 p-8 lg:p-10">
+        <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-semibold">Welcome {user?.name}</h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-600">{user?.email}</span>
             <button className="btn-primary" onClick={onLogout}>Log out</button>
           </div>
         </div>
+        
+        {/* Indices Cards - Nifty 50 & Nifty Bank */}
+        <div className="mb-6 grid grid-cols-2 gap-4 max-w-xl">
+          {['NSE_INDEX|Nifty 50', 'NSE_INDEX|Nifty Bank'].map(key => {
+            const item = indices.find(i => i.key === key);
+            const ltp = item?.ltp;
+            const changePct = item?.changePct;
+            const isUp = typeof changePct === 'number' && changePct >= 0;
+            const name = key.split('|')[1];
+            
+            return (
+              <div key={key} className="bg-white border rounded-lg p-4 shadow-sm">
+                <div className="text-sm font-medium text-slate-500 mb-1">{name}</div>
+                <div className="text-2xl font-bold text-slate-900 mb-1">
+                  {typeof ltp === 'number' ? ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </div>
+                <div className={`text-sm font-semibold ${isUp ? 'text-green-600' : 'text-red-600'}`}>
+                  {typeof changePct === 'number' ? (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%' : ''}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
         <div className="mb-6">
           <MarketClock exchange="NSE" fullWidth />
         </div>
@@ -66,8 +113,8 @@ export default function Dashboard({ user, setUser }) {
             )}
           </div>
         </div>
-        {/* Indices strip */}
-        <div className="mb-6 space-y-2">
+        {/* Old indices strip removed */}
+        <div className="mb-6 space-y-2" style={{display: 'none'}}>
           <div className="flex flex-wrap gap-6">
             {['NSE_INDEX|Nifty 50','NSE_INDEX|Nifty Bank'].map(key => {
               const item = indices.find(i => i.key === key);
@@ -122,7 +169,7 @@ export default function Dashboard({ user, setUser }) {
               const isUp = typeof changePct === 'number' && changePct >= 0;
               
               return (
-                <div key={key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1">
+                <div key={key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1 cursor-pointer" onClick={() => openChart(item)}>
                   <div className="flex items-start justify-between">
                     <div className="flex flex-col">
                       <div className="text-sm font-semibold tracking-wide" title={item.underlying}>{item.symbol}</div>
@@ -137,7 +184,7 @@ export default function Dashboard({ user, setUser }) {
                         </div>
                       ) : (
                         <button
-                          onClick={() => handleAdd(key)}
+                          onClick={(e) => { e.stopPropagation(); handleAdd(key); }}
                           className="text-xs px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-50 hover:bg-blue-700"
                           disabled={adding[key]}
                         >{adding[key] ? 'Adding…' : 'Add'}</button>
@@ -169,6 +216,14 @@ export default function Dashboard({ user, setUser }) {
         </div>
 
         {/* Gainers/Losers removed per request */}
+
+        {/* TradingView Chart Modal */}
+        <TradingViewModal
+          isOpen={chartModal.isOpen}
+          onClose={closeChart}
+          symbol={chartModal.symbol}
+          instrumentName={chartModal.name}
+        />
       </main>
     </div>
   );

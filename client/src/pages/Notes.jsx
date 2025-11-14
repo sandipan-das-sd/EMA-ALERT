@@ -152,32 +152,43 @@ export default function Notes() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex bg-slate-50">
       <Sidebar />
-      <main className="flex-1 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-semibold">Trading Notes</h1>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setShowForm(true)}
-              className="btn-primary"
-            >
-              New Note
-            </button>
+      <main className="flex-1 p-8">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Trading Notes</h1>
+            <p className="text-sm text-slate-600 mt-1">Keep track of your trading observations and analysis</p>
           </div>
+          <button 
+            onClick={() => setShowForm(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Note
+          </button>
         </div>
 
         {/* Search Bar */}
-        <div className="mb-6">
-          <div className="flex gap-2 max-w-md">
-            <input
-              type="text"
-              placeholder="Search notes by title, content, or tags..."
-              className="input flex-1"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <button onClick={clearSearch} className="btn-secondary">Clear</button>
+        <div className="mb-8">
+          <div className="flex gap-3 max-w-2xl">
+            <div className="relative flex-1">
+              <svg className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search notes by title, content, or tags..."
+                className="input w-full pl-10"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            {searchQuery && (
+              <button onClick={clearSearch} className="btn-secondary">Clear</button>
+            )}
           </div>
         </div>
 
@@ -251,53 +262,69 @@ export default function Notes() {
             )}
           </div>
         ) : (
-          <div className="grid gap-4">
+          <div className="grid gap-5 max-w-5xl">
             {(searchResults || notes).map((note, idx) => (
               <div
                 key={note._id}
-                className="border rounded-xl p-4 bg-white shadow-sm hover:shadow-lg transition transform hover:-translate-y-1"
+                className="border border-slate-200 rounded-xl p-6 bg-white shadow-sm hover:shadow-md transition-all duration-200"
               >
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="font-semibold text-lg">{note.title}</h3>
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="font-semibold text-xl text-slate-900">{note.title}</h3>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleEdit(note)}
-                      className="text-sm text-blue-600 hover:text-blue-700"
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Edit note"
                     >
-                      Edit
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
                     </button>
                     <button
                       onClick={() => handleDelete(note._id)}
-                      className="text-sm text-red-600 hover:text-red-700"
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete note"
                     >
-                      Delete
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
                     </button>
                   </div>
                 </div>
 
-                <div className="prose prose-sm max-w-none mb-3">
-                  <div className="whitespace-pre-wrap text-gray-700">
+                <div className="mb-4">
+                  <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">
                     {note.content}
                   </div>
                 </div>
 
                 {note.tags && note.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-3">
+                  <div className="flex flex-wrap gap-2 mb-4">
                     {note.tags.map((tag, index) => (
                       <span 
                         key={index} 
-                        className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full"
+                        className="px-3 py-1 bg-blue-50 text-blue-700 text-xs font-medium rounded-full border border-blue-100"
                       >
-                        {tag}
+                        #{tag}
                       </span>
                     ))}
                   </div>
                 )}
 
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Created: {formatDate(note.createdAt)}</span>
+                <div className="flex items-center gap-4 text-xs text-slate-500 pt-3 border-t border-slate-100">
+                  <span className="flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {formatDate(note.createdAt)}
+                  </span>
                   {note.updatedAt !== note.createdAt && (
-                    <span>Updated: {formatDate(note.updatedAt)}</span>
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      {formatDate(note.updatedAt)}
+                    </span>
                   )}
                 </div>
               </div>

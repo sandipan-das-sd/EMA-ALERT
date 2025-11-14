@@ -3,6 +3,8 @@ import { logout, addToWatchlist, API_URL } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
 import MarketClock from '../components/MarketClock.jsx';
 import InstrumentSearch from '../components/InstrumentSearch.jsx';
+import TradingViewModal from '../components/TradingViewModal.jsx';
+import { convertToTradingViewSymbol, getInstrumentDisplayName } from '../lib/tradingview.js';
 
 export default function Dashboard({ user, setUser }) {
   const [indices, setIndices] = useState([]); 
@@ -12,6 +14,7 @@ export default function Dashboard({ user, setUser }) {
   const [wsFailed, setWsFailed] = useState(false);
   const [polling, setPolling] = useState(false);
   const [universe, setUniverse] = useState([]);
+  const [chartModal, setChartModal] = useState({ isOpen: false, symbol: '', name: '' });
 
   useEffect(() => {
     // Load instrument universe from server
@@ -144,6 +147,24 @@ export default function Dashboard({ user, setUser }) {
     }
   }
 
+  function openChart(item) {
+    const key = item.instrumentKey || `${item.segment}|${item.symbol}`;
+    console.log('[DashboardSimple] Opening chart for item:', item);
+    
+    // Extract the actual trading symbol from the item
+    const actualSymbol = item.symbol || item.tradingSymbol || '';
+    
+    const tvSymbol = convertToTradingViewSymbol(key, actualSymbol, item.underlying);
+    const name = getInstrumentDisplayName(item);
+    
+    console.log('[DashboardSimple] TradingView symbol:', tvSymbol, 'Name:', name);
+    setChartModal({ isOpen: true, symbol: tvSymbol, name });
+  }
+
+  function closeChart() {
+    setChartModal({ isOpen: false, symbol: '', name: '' });
+  }
+
   return (
     <div className="min-h-screen flex">
       <Sidebar />
@@ -231,7 +252,7 @@ export default function Dashboard({ user, setUser }) {
               const isUp = typeof changePct === 'number' && changePct >= 0;
               
               return (
-                <div key={key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1">
+                <div key={key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1 cursor-pointer" onClick={() => openChart(item)}>
                   <div className="flex items-start justify-between">
                     <div className="flex flex-col">
                       <div className="text-sm font-semibold tracking-wide" title={item.underlying}>{item.symbol}</div>
@@ -246,7 +267,7 @@ export default function Dashboard({ user, setUser }) {
                       </div>
                     ) : (
                       <button
-                        onClick={() => handleAdd(key)}
+                        onClick={(e) => { e.stopPropagation(); handleAdd(key); }}
                         className="text-xs px-2 py-1 rounded bg-blue-600 text-white disabled:opacity-50 hover:bg-blue-700"
                         disabled={adding[key]}
                       >{adding[key] ? 'Adding…' : 'Add'}</button>
@@ -282,6 +303,14 @@ export default function Dashboard({ user, setUser }) {
             Loading popular scrips...
           </div>
         )}
+
+        {/* TradingView Chart Modal */}
+        <TradingViewModal
+          isOpen={chartModal.isOpen}
+          onClose={closeChart}
+          symbol={chartModal.symbol}
+          instrumentName={chartModal.name}
+        />
       </main>
     </div>
   );

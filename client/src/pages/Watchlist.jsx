@@ -2,11 +2,14 @@ import React, { useEffect, useState, useRef } from 'react';
 import { getWatchlist, removeFromWatchlist } from '../lib/api.js';
 import Sidebar from '../components/Sidebar.jsx';
 import MarketClock from '../components/MarketClock.jsx';
+import TradingViewModal from '../components/TradingViewModal.jsx';
+import { convertToTradingViewSymbol, getInstrumentDisplayName } from '../lib/tradingview.js';
 
 export default function Watchlist({ user, setUser }) {
   const [items, setItems] = useState([]);
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
+  const [chartModal, setChartModal] = useState({ isOpen: false, symbol: '', name: '' });
 
   useEffect(() => {
     let mounted = true;
@@ -135,6 +138,23 @@ export default function Watchlist({ user, setUser }) {
     }
   }
 
+  function openChart(item) {
+    console.log('[Watchlist] Opening chart for item:', item);
+    
+    // Extract the actual trading symbol
+    const actualSymbol = item.tradingSymbol || item.symbol || '';
+    
+    const tvSymbol = convertToTradingViewSymbol(item.key, actualSymbol, item.name);
+    const name = getInstrumentDisplayName(item);
+    
+    console.log('[Watchlist] TradingView symbol:', tvSymbol, 'Name:', name);
+    setChartModal({ isOpen: true, symbol: tvSymbol, name });
+  }
+
+  function closeChart() {
+    setChartModal({ isOpen: false, symbol: '', name: '' });
+  }
+
   return (
     <div className="min-h-screen flex">
       <Sidebar />
@@ -171,7 +191,7 @@ export default function Watchlist({ user, setUser }) {
             const hasPrice = typeof item.price === 'number';
             
             return (
-              <div key={item.key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1">
+              <div key={item.key} className="border rounded-xl p-4 bg-white flex flex-col gap-3 shadow-sm hover:shadow-lg transition transform hover:-translate-y-1 cursor-pointer" onClick={() => openChart(item)}>
                 <div className="flex items-start justify-between">
                   <div className="flex flex-col">
                     <div className="text-sm font-bold tracking-wide text-gray-900" title={item.name}>
@@ -183,7 +203,7 @@ export default function Watchlist({ user, setUser }) {
                       </div>
                     )}
                   </div>
-                  <button onClick={() => onRemove(item.key)} className="text-xs px-2 py-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
+                  <button onClick={(e) => { e.stopPropagation(); onRemove(item.key); }} className="text-xs px-2 py-1 rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
                 </div>
                 <div className="flex items-baseline gap-3">
                   <span className={`text-xl font-semibold tabular-nums ${
@@ -213,6 +233,14 @@ export default function Watchlist({ user, setUser }) {
             );
           })}
         </div>
+
+        {/* TradingView Chart Modal */}
+        <TradingViewModal
+          isOpen={chartModal.isOpen}
+          onClose={closeChart}
+          symbol={chartModal.symbol}
+          instrumentName={chartModal.name}
+        />
       </main>
     </div>
   );
