@@ -314,15 +314,12 @@ async function main() {
         emaOpenEffective !== null
           ? Math.abs(emaOpenEffective - r.open) <= tol
           : false;
-      const stayedAboveEma =
-        emaOpenEffective !== null ? r.low >= emaOpenEffective : false;
       const closedAboveEma =
-        emaOpenEffective !== null ? r.close > emaOpenEffective : false;
+        r.emaAtClose !== null ? r.close > r.emaAtClose : false;
       const signal =
         candleClosed &&
         isGreen &&
         prevEmaCloseToOpen &&
-        stayedAboveEma &&
         closedAboveEma &&
         inMarketHours;
       return {
@@ -330,7 +327,6 @@ async function main() {
         candleClosed,
         isGreen,
         prevEmaCloseToOpen,
-        stayedAboveEma,
         closedAboveEma,
         usedEmaFallback,
         inMarketHours,

@@ -475,13 +475,7 @@ export function startAlertEngine({
       ).padStart(2, "0")}:00 IST`;
 
       // Only log when signal triggers
-      if (
-        candleClosed &&
-        isGreen &&
-        prevEmaCloseToOpen &&
-        stayedAboveEma &&
-        closedAboveEma
-      ) {
+      if (candleClosed && isGreen && prevEmaCloseToOpen && (close > emaCurr)) {
         console.log(
           `\n🎯 [AlertEngine] SIGNAL for ${instrumentKey} at ${startIstStr} | open=${open.toFixed(
             2
