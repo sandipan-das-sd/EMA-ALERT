@@ -288,7 +288,7 @@ async function main() {
     const now = Date.now();
     const tolPercent = (() => {
       const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT);
-      return Number.isFinite(v) && v >= 0 ? v : 0.001;
+      return Number.isFinite(v) && v >= 0 ? v : 0.0005;
     })();
 
     const evaluated = rows.map((r) => {

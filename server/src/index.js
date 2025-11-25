@@ -137,6 +137,15 @@ async function start() {
     }
     
     console.log(`[Universe] Built from BOD: ${resolvedUniverse.length} instruments`);
+    // Optionally limit universe size to reduce load (default: top 10)
+    const bodTopN = (() => {
+      const v = parseInt(process.env.BOD_TOP_N, 10);
+      return Number.isInteger(v) && v > 0 ? v : 10;
+    })();
+    if (resolvedUniverse.length > bodTopN) {
+      resolvedUniverse = resolvedUniverse.slice(0, bodTopN);
+      console.log(`[Universe] Trimmed to top ${bodTopN} BOD instruments to reduce load`);
+    }
     if (resolvedUniverse.length === 0) {
       console.warn('[Universe] No instruments found! Check BOD data loading.');
     }
@@ -505,7 +514,14 @@ async function start() {
     }
 
     // Start alert engine in background (independent of WS)
-    startAlertEngine({ apiBase, accessToken, instrumentsSearchService, dynamicSubscriptionManager, intervalMs: 60_000 });
+    startAlertEngine({ 
+      apiBase, 
+      accessToken, 
+      instrumentsSearchService, 
+      dynamicSubscriptionManager, 
+      intervalMs: 60_000,
+      whatsappPhoneNumber: process.env.WHATSAPP_PHONE_NUMBER 
+    });
 
     wss.on('connection', (socket) => {
       socket.send(JSON.stringify({ type: 'info', message: 'Connected to EMA-ALERT ticker' }));

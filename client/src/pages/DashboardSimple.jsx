@@ -16,6 +16,8 @@ export default function Dashboard({ user, setUser }) {
   const [wsFailed, setWsFailed] = useState(false);
   const [polling, setPolling] = useState(false);
   const [universe, setUniverse] = useState([]);
+  const [showAllUniverse, setShowAllUniverse] = useState(false);
+  const UNIVERSE_TOP_N = 10;
 
   useEffect(() => {
     // Load instrument universe from server
@@ -280,9 +282,19 @@ export default function Dashboard({ user, setUser }) {
 
         {/* Popular Scrips with live ticks */}
         <div className="mt-8">
-          <h2 className="text-lg font-semibold mb-4">Popular Scrips</h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Popular Scrips</h2>
+            {universe.length > UNIVERSE_TOP_N && (
+              <button
+                className="text-sm text-blue-600 underline"
+                onClick={() => setShowAllUniverse((s) => !s)}
+              >
+                {showAllUniverse ? `Show top ${UNIVERSE_TOP_N}` : `Show all (${universe.length})`}
+              </button>
+            )}
+          </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {universe.map((item) => {
+            {(showAllUniverse ? universe : universe.slice(0, UNIVERSE_TOP_N)).map((item) => {
               const key =
                 item.instrumentKey || `${item.segment}|${item.symbol}`;
               const tick = ticks[key];

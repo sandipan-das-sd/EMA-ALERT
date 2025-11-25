@@ -1,5 +1,6 @@
 import fetch from "node-fetch";
 import Alert from "../models/Alert.js";
+import wbm from 'wbm';
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -52,6 +53,7 @@ export function startAlertEngine({
   instrumentsSearchService,
   dynamicSubscriptionManager,
   intervalMs = 60_000,
+  whatsappPhoneNumber,
 }) {
   if (!accessToken) {
     console.warn("[AlertEngine] Disabled: missing UPSTOX_ACCESS_TOKEN");
@@ -60,6 +62,22 @@ export function startAlertEngine({
 
   console.log("[AlertEngine] Starting with interval:", intervalMs, "ms");
   console.log("[AlertEngine] API Base URL:", apiBase);
+
+  // Initialize WhatsApp if phone number provided. Keep a ready-promise to await before sending.
+  let _whatsappReady = Promise.resolve();
+  if (whatsappPhoneNumber) {
+    // Open the browser on first run so user can scan QR; session:true attempts to persist session.
+    _whatsappReady = wbm
+      .start({ showBrowser: true, qrCodeData: true, session: true })
+      .then(() => {
+        console.log('[AlertEngine] WhatsApp initialized');
+      })
+      .catch((err) => {
+        console.error('[AlertEngine] WhatsApp init error:', err);
+        // keep the promise rejected so sends will fail fast and be logged
+        throw err;
+      });
+  }
 
   const headers = {
     Authorization: `Bearer ${accessToken}`,
@@ -403,9 +421,10 @@ export function startAlertEngine({
     };
 
     // Tolerance for 'intersects the opening' check (percentage of price)
+    // Default tightened to 0.0005 (0.05%) to reduce false positives; can be overridden via env
     const tolPercent = (() => {
       const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT);
-      return Number.isFinite(v) && v >= 0 ? v : 0.001;
+      return Number.isFinite(v) && v >= 0 ? v : 0.0005;
     })();
 
     // Which candle indices to check (last N closed candles that have EMA)
@@ -474,6 +493,19 @@ export function startAlertEngine({
         startIstDate.getUTCMinutes()
       ).padStart(2, "0")}:00 IST`;
 
+      // Diagnostic: if candle is closed and green but no signal, log why
+      if (candleClosed && isGreen) {
+        const reasons = [];
+        if (!prevEmaCloseToOpen) reasons.push("open_not_within_tolerance");
+        if (!(close > emaCurr)) reasons.push("close_not_above_emaAtClose");
+        if (!inMarketHours) reasons.push("out_of_market_hours");
+        if (reasons.length) {
+          console.log(
+            `[AlertEngine] INFO ${instrumentKey} ${startIstStr} - no signal: ${reasons.join(", ")} | open=${open.toFixed(2)} emaOpenEff=${emaOpenEffective.toFixed(5)} emaClose=${(emaCurr!==null?emaCurr.toFixed(5):'null')} close=${close.toFixed(2)} tol=${tol.toFixed(6)}`
+          );
+        }
+      }
+
       // Only log when signal triggers
       if (candleClosed && isGreen && prevEmaCloseToOpen && (close > emaCurr)) {
         console.log(
@@ -491,6 +523,19 @@ export function startAlertEngine({
           close,
           ema: emaOpenEffective,
         });
+
+        // Send WhatsApp message if configured
+        if (whatsappPhoneNumber) {
+          const message = `EMA Alert: ${instrumentKey} crossed above EMA at ${close.toFixed(2)} (${startIstStr})`;
+          try {
+            // Wait for whatsapp initialization to complete (or fail)
+            await _whatsappReady;
+            await wbm.send([whatsappPhoneNumber], message);
+            console.log(`[AlertEngine] WhatsApp message sent for ${instrumentKey}`);
+          } catch (err) {
+            console.error(`[AlertEngine] Failed to send WhatsApp message for ${instrumentKey}:`, err?.message || err);
+          }
+        }
       }
     }
 
