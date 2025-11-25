@@ -29,13 +29,19 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173',"https://trade.gyanoda.in","https://nifty.gyanoda.in"],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://trade.gyanoda.in', 'https://nifty.gyanoda.in'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  exposedHeaders: ['Set-Cookie'],
+  maxAge: 86400
 }));
 
 app.get('/api/health', (req, res) => {
