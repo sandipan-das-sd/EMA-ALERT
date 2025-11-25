@@ -9,10 +9,7 @@ pnpm-debug.log*
 # Node
 node_modules/
 
-# Env files
-.env
-server/.env
-client/.env
+
 
 # Build outputs
 client/dist/
