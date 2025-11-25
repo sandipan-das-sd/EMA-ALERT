@@ -40,7 +40,9 @@ export default function Watchlist({ user, setUser }) {
 
     // Only start WebSocket for watchlist page - this implements route-based calling
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${window.location.hostname}:4000/ws/ticker`;
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const port = isLocalhost ? ':4000' : '';
+    const url = `${proto}://${window.location.hostname}${port}/ws/ticker`;
     const ws = new WebSocket(url);
     wsRef.current = ws;
 

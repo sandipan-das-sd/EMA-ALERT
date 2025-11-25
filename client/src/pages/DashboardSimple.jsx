@@ -30,7 +30,9 @@ export default function Dashboard({ user, setUser }) {
 
     // Start WebSocket connection
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${window.location.hostname}:4000/ws/ticker`;
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const port = isLocalhost ? ':4000' : '';
+    const url = `${proto}://${window.location.hostname}${port}/ws/ticker`;
     const ws = new WebSocket(url);
 
     const failSafe = setTimeout(() => {
