@@ -12,6 +12,8 @@ import {
 
 export default function Dashboard({ user, setUser }) {
   const { ticks, indices, universe, polling, connected } = usePrices();
+  const [showAllUniverse, setShowAllUniverse] = useState(false);
+  const UNIVERSE_TOP_N = 10;
   const [adding, setAdding] = useState({}); // instrumentKey -> boolean
   const [nifty, setNifty] = useState({ ltp: null, ts: null, error: "" });
 
@@ -203,8 +205,20 @@ export default function Dashboard({ user, setUser }) {
         {/* Instrument universe with live ticks */}
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-4">Popular Scrips</h2>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm text-slate-600">Showing popular instruments</h3>
+            {universe.length > UNIVERSE_TOP_N && (
+              <button
+                className="text-sm text-blue-600 underline"
+                onClick={() => setShowAllUniverse((s) => !s)}
+              >
+                {showAllUniverse ? `Show top ${UNIVERSE_TOP_N}` : `Show all (${universe.length})`}
+              </button>
+            )}
+          </div>
+
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {universe.map((item) => {
+            {(showAllUniverse ? universe : universe.slice(0, UNIVERSE_TOP_N)).map((item) => {
               const key =
                 item.instrumentKey || `${item.segment}|${item.symbol}`;
               const tick = ticks[key];

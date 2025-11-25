@@ -21,6 +21,7 @@
     "protobufjs": "^7.3.2",
     "stream-json": "^1.9.1",
     "uuid": "^9.0.1",
+    "wbm": "^1.1.16",
     "ws": "^8.18.0"
   },
   "devDependencies": {
