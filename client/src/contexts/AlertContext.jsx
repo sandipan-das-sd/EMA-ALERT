@@ -13,10 +13,88 @@ export function AlertProvider({ children, user }) {
   const [active, setActive] = useState([]); // active alerts to show as toasts
   const lastPoll = useRef(0);
   const instrumentCache = useRef(new Map()); // Cache instrument details
+  const wsRef = useRef(null);
 
   useEffect(() => {
     if (!user) { setActive([]); return; }
     let stop = false;
+    // Real-time: connect to WS for instant alerts
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const port = isLocalhost ? ':4000' : '';
+    const url = `${proto}://${window.location.hostname}${port}/ws/ticker`;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onmessage = async (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        console.log('[AlertContext] WS message received:', msg.type, msg.alert ? `for ${msg.alert.instrumentKey}` : '');
+        if (msg.type === 'alert' && msg.alert) {
+          const a = msg.alert;
+          console.log('[AlertContext] Processing alert for user', a.userId, 'current user', user.id);
+          // Only show alerts for the current user
+          if (String(a.userId) !== String(user.id)) {
+            console.log('[AlertContext] Alert not for current user, skipping');
+            return;
+          }
+          console.log('[AlertContext] Alert from server has instrumentName:', a.instrumentName);
+          // Enrich instrument name - use provided name or fetch if needed
+          let instrumentName = a.instrumentName; // Use name from server if available
+          if (!instrumentName && !instrumentCache.current.has(a.instrumentKey)) {
+            try {
+              const inst = await getInstrument(a.instrumentKey);
+              if (inst) {
+                instrumentCache.current.set(a.instrumentKey, inst);
+                // For FO instruments, prioritize tradingSymbol which has the full contract details
+                instrumentName = inst.tradingSymbol || inst.name || a.instrumentKey;
+              }
+            } catch (err) {
+              console.warn('[AlertContext] Failed to fetch instrument details:', err);
+            }
+          }
+          if (!instrumentName && instrumentCache.current.has(a.instrumentKey)) {
+            const inst = instrumentCache.current.get(a.instrumentKey);
+            // For FO instruments, prioritize tradingSymbol which has the full contract details
+            instrumentName = inst.tradingSymbol || inst.name || a.instrumentKey;
+          }
+          if (!instrumentName) {
+            instrumentName = a.instrumentKey; // fallback
+          }
+          
+          const enriched = {
+            _id: a._id || `${a.userId}:${a.instrumentKey}:${a.candle?.ts || Date.now()}`, // synthetic id if missing
+            instrumentKey: a.instrumentKey,
+            instrumentName: instrumentName,
+            timeframe: a.timeframe || '15m',
+            strategy: a.strategy || 'ema20_cross_up',
+            candle: a.candle,
+            ema: a.ema,
+            status: 'active',
+            createdAt: a.createdAt || new Date().toISOString(),
+          };
+          console.log('[AlertContext] Adding enriched alert to UI:', enriched.instrumentName);
+          setActive(prev => {
+            const map = new Map(prev.map(x => [x._id, x]));
+            map.set(enriched._id, enriched);
+            console.log('[AlertContext] Active alerts count:', map.size);
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.error('[AlertContext] Error processing WS message:', err);
+      }
+    };
+    ws.onopen = () => {
+      console.log('[AlertContext] WebSocket connected successfully');
+    };
+    ws.onclose = () => { 
+      console.log('[AlertContext] WebSocket disconnected');
+      wsRef.current = null; 
+    };
+    ws.onerror = (err) => {
+      console.error('[AlertContext] WebSocket error:', err);
+    };
     const poll = async () => {
       try {
         const since = lastPoll.current ? lastPoll.current : undefined;
@@ -53,7 +131,8 @@ export function AlertProvider({ children, user }) {
             const instrument = instrumentCache.current.get(alert.instrumentKey);
             return {
               ...alert,
-              instrumentName: instrument?.name || instrument?.tradingSymbol || alert.instrumentKey
+              // For FO instruments, prioritize tradingSymbol which has the full contract details
+              instrumentName: instrument?.tradingSymbol || instrument?.name || alert.instrumentKey
             };
           }));
           
@@ -71,7 +150,7 @@ export function AlertProvider({ children, user }) {
     };
     const id = setInterval(poll, 15_000);
     poll();
-    return () => { stop = true; clearInterval(id); };
+    return () => { stop = true; clearInterval(id); if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; } };
   }, [user]);
 
   async function dismiss(id) {

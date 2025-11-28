@@ -19,7 +19,8 @@ export default function Notifications() {
         try {
           const instrument = await getInstrument(alert.instrumentKey);
           if (instrument) {
-            names[alert.instrumentKey] = instrument.name || instrument.tradingSymbol;
+            // For FO instruments, prioritize tradingSymbol which has the full contract details
+            names[alert.instrumentKey] = instrument.tradingSymbol || instrument.name || alert.instrumentKey;
           }
         } catch (err) {
           console.error(`Failed to fetch instrument ${alert.instrumentKey}:`, err);

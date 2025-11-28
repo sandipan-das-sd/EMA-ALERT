@@ -526,7 +526,15 @@ async function start() {
       instrumentsSearchService, 
       dynamicSubscriptionManager, 
       intervalMs: 60_000,
-      whatsappPhoneNumber: process.env.WHATSAPP_PHONE_NUMBER 
+      whatsappPhoneNumber: process.env.WHATSAPP_PHONE_NUMBER,
+      broadcastAlert: (alert) => {
+        const payload = JSON.stringify({ type: 'alert', alert });
+        try {
+          wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+        } catch (e) {
+          console.warn('[WS] Failed to broadcast alert:', e?.message || e);
+        }
+      }
     });
 
     wss.on('connection', (socket) => {

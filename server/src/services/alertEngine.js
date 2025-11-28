@@ -54,6 +54,7 @@ export function startAlertEngine({
   dynamicSubscriptionManager,
   intervalMs = 60_000,
   whatsappPhoneNumber,
+  broadcastAlert, // optional: function to push alerts to WS clients
 }) {
   if (!accessToken) {
     console.warn("[AlertEngine] Disabled: missing UPSTOX_ACCESS_TOKEN");
@@ -90,6 +91,8 @@ export function startAlertEngine({
   const failureCount = new Map(); // Track failures per key
   const permanentlyFailed = new Set(); // Keys that have failed too many times
   const historicalCache = new Map(); // Cache previous-day candles per instrument
+  // De-duplicate alerts so scanning older candles doesn't resend repeatedly
+  const sentAlerts = new Set(); // `${instrumentKey}::${ts}`
 
   /**
    * Build historical API URL for a specific date
@@ -420,11 +423,23 @@ export function startAlertEngine({
       return emaValues[emaIndex];
     };
 
-    // Tolerance for 'intersects the opening' check (percentage of price)
-    // Default tightened to 0.0005 (0.05%) to reduce false positives; can be overridden via env
-    const tolPercent = (() => {
+    // Tolerance for 'intersects the opening' check.
+    // Default: equities/index use tight 0.05% (0.0005).
+    // FO-only override: allow looser tolerance via env or sensible defaults.
+    const baseTolPercent = (() => {
       const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT);
       return Number.isFinite(v) && v >= 0 ? v : 0.0005;
+    })();
+    // FO specific tolerance controls (ONLY applied to *_FO keys)
+    const foTolPercent = (() => {
+      const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT_FO);
+      // Default to 2.5% for FO if not provided
+      return Number.isFinite(v) && v >= 0 ? v : 0.025;
+    })();
+    const foTolAbs = (() => {
+      const v = parseFloat(process.env.EMA_OPEN_TOL_ABS_FO);
+      // Provide a small absolute floor for option prices
+      return Number.isFinite(v) && v >= 0 ? v : 5;
     })();
 
     // Which candle indices to check (last N closed candles that have EMA)
@@ -477,7 +492,14 @@ export function startAlertEngine({
 
       if (emaOpenEffective === null) continue; // cannot evaluate
 
-      const tol = Math.max(0.0001, open * tolPercent);
+      // Detect if the instrument is Futures/Options from the key format
+      const keyForType = (workingKey || instrumentKey) || "";
+      const isFO = typeof keyForType === "string" && keyForType.includes("_FO");
+
+      // Apply FO-only relaxed tolerance; others keep the base tolerance
+      const tol = isFO
+        ? Math.max(0.0001, open * foTolPercent, foTolAbs)
+        : Math.max(0.0001, open * baseTolPercent);
       const prevEmaCloseToOpen = Math.abs(emaOpenEffective - open) <= tol;
       const stayedAboveEma = low >= emaOpenEffective;
       const closedAboveEma = close > emaOpenEffective;
@@ -506,8 +528,13 @@ export function startAlertEngine({
         }
       }
 
-      // Only log when signal triggers
+      // Only log/send when signal triggers (dedup by instrument + candle start)
       if (candleClosed && isGreen && prevEmaCloseToOpen && (close > emaCurr)) {
+        const alertId = `${instrumentKey}::${candleStartTs}`;
+        if (sentAlerts.has(alertId)) {
+          continue;
+        }
+        sentAlerts.add(alertId);
         console.log(
           `\n🎯 [AlertEngine] SIGNAL for ${instrumentKey} at ${startIstStr} | open=${open.toFixed(
             2
@@ -524,16 +551,26 @@ export function startAlertEngine({
           ema: emaOpenEffective,
         });
 
-        // Send WhatsApp message if configured
+        // Send WhatsApp message if configured and instrument is still in any watchlist
         if (whatsappPhoneNumber) {
-          const message = `EMA Alert: ${instrumentKey} crossed above EMA at ${close.toFixed(2)} (${startIstStr})`;
-          try {
-            // Wait for whatsapp initialization to complete (or fail)
-            await _whatsappReady;
-            await wbm.send([whatsappPhoneNumber], message);
-            console.log(`[AlertEngine] WhatsApp message sent for ${instrumentKey}`);
-          } catch (err) {
-            console.error(`[AlertEngine] Failed to send WhatsApp message for ${instrumentKey}:`, err?.message || err);
+          let stillWatched = false;
+          for (const [_, wl] of dynamicSubscriptionManager.userWatchlists) {
+            if (wl && wl.has(instrumentKey)) {
+              stillWatched = true;
+              break;
+            }
+          }
+          if (stillWatched) {
+            const message = `EMA Alert: ${instrumentKey} crossed above EMA at ${close.toFixed(2)} (${startIstStr})`;
+            try {
+              await _whatsappReady;
+              await wbm.send([whatsappPhoneNumber], message);
+              console.log(`[AlertEngine] WhatsApp message sent for ${instrumentKey}`);
+            } catch (err) {
+              console.error(`[AlertEngine] Failed to send WhatsApp message for ${instrumentKey}:`, err?.message || err);
+            }
+          } else {
+            console.log(`[AlertEngine] Skipping WhatsApp for ${instrumentKey} (no longer in watchlists)`);
           }
         }
       }
@@ -557,6 +594,17 @@ export function startAlertEngine({
 
       // Filter out permanently failed keys
       const keysToProcess = allKeys.filter((k) => !permanentlyFailed.has(k));
+
+      // Cleanup caches for instruments no longer in watchlists
+      for (const k of Array.from(workingKeyCache.keys())) {
+        if (!allKeys.includes(k)) workingKeyCache.delete(k);
+      }
+      for (const k of Array.from(failureCount.keys())) {
+        if (!allKeys.includes(k)) failureCount.delete(k);
+      }
+      for (const k of Array.from(permanentlyFailed)) {
+        if (!allKeys.includes(k)) permanentlyFailed.delete(k);
+      }
 
       console.log(
         `\n[AlertEngine] ===== TICK ${new Date().toISOString()} =====`
@@ -606,6 +654,7 @@ export function startAlertEngine({
                   if (data && data.length > 0) {
                     // Reset failure count on success
                     failureCount.delete(origKey);
+                    permanentlyFailed.delete(origKey);
                     successfulKeys.add(origKey);
                   }
                 } else {
@@ -624,6 +673,7 @@ export function startAlertEngine({
                   data = result.data;
                   workingKeyCache.set(origKey, workingKey);
                   failureCount.delete(origKey); // Reset on success
+                  permanentlyFailed.delete(origKey); // Allow reprocessing after success
                   successfulKeys.add(origKey);
 
                   if (workingKey !== origKey) {
@@ -651,11 +701,17 @@ export function startAlertEngine({
 
               // Evaluate for signals (check last N closed candles)
               if (data && data.length > 0) {
+                const isFOKey = typeof origKey === 'string' && origKey.includes('_FO');
+                const scanFO = parseInt(process.env.EMA_SCAN_LAST_N_CANDLES_FO, 10);
+                const scanBase = parseInt(process.env.EMA_SCAN_LAST_N_CANDLES, 10);
+                const maxToCheck = isFOKey
+                  ? (Number.isFinite(scanFO) && scanFO > 0 ? scanFO : 24)
+                  : (Number.isFinite(scanBase) && scanBase > 0 ? scanBase : 12);
                 const signals = await evaluate(
                   data,
                   origKey,
                   workingKey,
-                  Number(process.env.EMA_SCAN_LAST_N_CANDLES) || 12
+                  maxToCheck
                 );
                 if (signals && signals.length > 0) {
                   keyToSignal.set(origKey, signals);
@@ -702,11 +758,61 @@ export function startAlertEngine({
       if (keyToSignal.size > 0) {
         console.log(`\n[AlertEngine] Creating ${keyToSignal.size} alert(s)...`);
         const ops = [];
+        
+        // Broadcast alerts immediately when detected (before DB operations)
+        if (typeof broadcastAlert === 'function') {
+          for (const [instrumentKey, signals] of keyToSignal) {
+            // Look up instrument details once per instrument
+            let instrumentName = instrumentKey;
+            try {
+              const instrument = instrumentsSearchService.getInstrument(instrumentKey);
+              console.log(`[AlertEngine] Instrument lookup for ${instrumentKey}:`, {
+                found: !!instrument,
+                name: instrument?.name,
+                tradingSymbol: instrument?.tradingSymbol
+              });
+              if (instrument) {
+                // For FO instruments, prefer tradingSymbol which includes the full contract details
+                instrumentName = instrument.tradingSymbol || instrument.name || instrumentKey;
+              }
+            } catch (e) {
+              console.warn(`[AlertEngine] Could not fetch instrument details for ${instrumentKey}:`, e?.message || e);
+            }
+            
+            for (const sig of signals) {
+              // Find all users who have this instrument in their watchlist
+              for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
+                if (watchlistSet && watchlistSet.has(instrumentKey)) {
+                  try {
+                    console.log(`[AlertEngine] Broadcasting alert for ${instrumentKey} (${instrumentName}) to user ${userId}`);
+                    broadcastAlert({
+                      userId,
+                      instrumentKey,
+                      instrumentName,
+                      timeframe: '15m',
+                      strategy: 'ema20_cross_up',
+                      candle: { ts: sig.ts, open: sig.open, high: sig.high, low: sig.low, close: sig.close },
+                      ema: sig.ema,
+                      createdAt: new Date().toISOString(),
+                    });
+                  } catch (e) {
+                    console.warn(`[AlertEngine] Broadcast failed for user ${userId}:`, e?.message || e);
+                  }
+                }
+              }
+            }
+          }
+        }
 
         for (const [userId, keys] of userMap) {
           for (const k of keys) {
             const sigs = keyToSignal.get(k) || [];
             if (!sigs.length) continue;
+
+            // Re-check membership to prevent alerts for removed instruments mid-tick
+            const currentSet = dynamicSubscriptionManager.userWatchlists.get(userId);
+            const isStillMember = currentSet && currentSet.has(k);
+            if (!isStillMember) continue;
 
             for (const sig of sigs) {
               ops.push(

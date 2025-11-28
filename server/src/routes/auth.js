@@ -6,10 +6,18 @@ const router = express.Router();
 
 function setTokenCookie(res, userId) {
   const token = signToken({ id: userId });
-  res.cookie(process.env.COOKIE_NAME, token, {
+  const sameSite = (process.env.COOKIE_SAMESITE || 'lax').toLowerCase();
+  const secure = (() => {
+    const v = process.env.COOKIE_SECURE;
+    if (typeof v === 'string') {
+      return v === 'true' || v === '1';
+    }
+    return process.env.NODE_ENV === 'production';
+  })();
+  res.cookie(process.env.COOKIE_NAME || 'auth_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure,
+    sameSite: sameSite === 'none' ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 }

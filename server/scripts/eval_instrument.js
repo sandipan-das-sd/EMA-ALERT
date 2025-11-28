@@ -286,9 +286,19 @@ async function main() {
     // Evaluate each of the last rows for the strict rule
     const timeframeMs = 15 * 60 * 1000;
     const now = Date.now();
-    const tolPercent = (() => {
+    const baseTolPercent = (() => {
       const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT);
       return Number.isFinite(v) && v >= 0 ? v : 0.0005;
+    })();
+    // FO detection from provided key
+    const isFO = typeof key === 'string' && key.includes('_FO');
+    const foTolPercent = (() => {
+      const v = parseFloat(process.env.EMA_OPEN_TOL_PERCENT_FO);
+      return Number.isFinite(v) && v >= 0 ? v : 0.025;
+    })();
+    const foTolAbs = (() => {
+      const v = parseFloat(process.env.EMA_OPEN_TOL_ABS_FO);
+      return Number.isFinite(v) && v >= 0 ? v : 5;
     })();
 
     const evaluated = rows.map((r) => {
@@ -304,7 +314,9 @@ async function main() {
       const inMarketHours = afterMarketOpen && beforeMarketLastStart;
       const candleClosed = now >= candleEndTs;
       const isGreen = r.close > r.open;
-      const tol = Math.max(0.0001, r.open * tolPercent);
+      const tol = isFO
+        ? Math.max(0.0001, r.open * foTolPercent, foTolAbs)
+        : Math.max(0.0001, r.open * baseTolPercent);
       // If emaAtOpen is missing (first EMA point), fall back to emaAtClose for evaluation
       const emaOpenEffective =
         r.emaAtOpen !== null ? r.emaAtOpen : r.emaAtClose;
