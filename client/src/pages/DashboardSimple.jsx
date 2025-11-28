@@ -168,7 +168,8 @@ export default function Dashboard({ user, setUser }) {
     const tvSymbol = convertToTradingViewSymbol(
       key,
       actualSymbol,
-      item.underlying
+      item.underlying,
+      item.expiry
     );
     const name = getInstrumentDisplayName(item);
 
@@ -180,7 +181,7 @@ export default function Dashboard({ user, setUser }) {
     );
 
     if (tvSymbol) {
-      const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
+      const url = `https://in.tradingview.com/chart/YsevYcgp/?symbol=${encodeURIComponent(
         tvSymbol
       )}&interval=15`;
       window.open(url, "_blank", "noopener,noreferrer");

@@ -65,6 +65,7 @@ router.get("/", async (req, res) => {
         name: instrument?.name || key.split("|")[1] || key,
         tradingSymbol: instrument?.tradingSymbol || key.split("|")[1] || key,
         segment: instrument?.segment || key.split("|")[0] || "Unknown",
+        expiry: instrument?.expiry || null,
         price,
         changePct,
         change,

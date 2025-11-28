@@ -162,20 +162,28 @@ export default function Watchlist({ user, setUser }) {
   function openChart(item) {
     console.log("[Watchlist] Opening chart for item:", item);
 
+    // For F&O instruments, construct a proper key using segment and tradingSymbol
+    // Otherwise use the existing key
+    let instrumentKey = item.key;
+    if (item.segment && item.segment.includes('FO') && item.tradingSymbol) {
+      instrumentKey = `${item.segment}|${item.tradingSymbol}`;
+    }
+
     // Extract the actual trading symbol
     const actualSymbol = item.tradingSymbol || item.symbol || "";
 
     const tvSymbol = convertToTradingViewSymbol(
-      item.key,
+      instrumentKey,
       actualSymbol,
-      item.name
+      item.name,
+      item.expiry
     );
     const name = getInstrumentDisplayName(item);
 
     console.log("[Watchlist] TradingView symbol:", tvSymbol, "Name:", name);
 
     if (tvSymbol) {
-      const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
+      const url = `https://in.tradingview.com/chart/YsevYcgp/?symbol=${encodeURIComponent(
         tvSymbol
       )}&interval=15`;
       window.open(url, "_blank", "noopener,noreferrer");

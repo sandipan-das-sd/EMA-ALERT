@@ -53,17 +53,18 @@ export default function Dashboard({ user, setUser }) {
     // Priority: symbol > tradingSymbol > underlying
     const actualSymbol = item.symbol || item.tradingSymbol || "";
 
-    const tvSymbol = convertToTradingViewSymbol(
-      key,
-      actualSymbol,
-      item.underlying
-    );
+      const tvSymbol = convertToTradingViewSymbol(
+        key,
+        actualSymbol,
+        item.underlying,
+        item.expiry
+      );
     const name = getInstrumentDisplayName(item);
 
     console.log("[Dashboard] TradingView symbol:", tvSymbol, "Name:", name);
 
     if (tvSymbol) {
-      const url = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
+      const url = `https://in.tradingview.com/chart/YsevYcgp/?symbol=${encodeURIComponent(
         tvSymbol
       )}&interval=15`;
       window.open(url, "_blank", "noopener,noreferrer");
