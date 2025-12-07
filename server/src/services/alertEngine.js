@@ -496,13 +496,34 @@ export function startAlertEngine({
       const keyForType = (workingKey || instrumentKey) || "";
       const isFO = typeof keyForType === "string" && keyForType.includes("_FO");
 
-      // Apply FO-only relaxed tolerance; others keep the base tolerance
-      const tol = isFO
-        ? Math.max(0.0001, open * foTolPercent, foTolAbs)
-        : Math.max(0.0001, open * baseTolPercent);
-      const prevEmaCloseToOpen = Math.abs(emaOpenEffective - open) <= tol;
-      const stayedAboveEma = low >= emaOpenEffective;
-      const closedAboveEma = close > emaOpenEffective;
+      // Determine tolerance and intersection rules
+      // Identify instrument details (trading symbol) when available to distinguish Options (PE/CE)
+      let inst = null;
+      try {
+        inst = instrumentsSearchService?.getInstrument?.(workingKey || instrumentKey) || null;
+      } catch (e) {
+        inst = null;
+      }
+      const tradingSymbol = inst?.tradingSymbol || "";
+      const isOption = /\b(PE|CE)\b/i.test(tradingSymbol);
+
+      // Base intersection tolerance: use tight percent by default
+      const tolPercentForIntersect = isFO
+        ? // For F&O, prefer a configurable percent but keep it tighter for Options
+          (isOption ? Math.min(foTolPercent, 0.005) : foTolPercent)
+        : baseTolPercent;
+
+      // Absolute tolerance for intersection (small floor) - for options keep it small
+      const absTolForIntersect = isFO ? (isOption ? Math.max(0.01, foTolAbs / 100) : foTolAbs) : 0.0001;
+
+      // Intersection tolerance in price units
+      const tolIntersect = Math.max(0.0001, open * tolPercentForIntersect, absTolForIntersect);
+
+      // Check whether EMA intersects the candle (within high/low +- tolerance)
+      const emaIntersectsCandle = emaOpenEffective >= (low - tolIntersect) && emaOpenEffective <= (high + tolIntersect);
+
+      // Require that the candle closed above the EMA at close (use ema at close for final check)
+      const closedAboveEma = emaCurr !== null ? (close > emaCurr) : (close > emaOpenEffective);
 
       // Format IST timestamp
       const startIstDate = new Date(candleStartTs + IST_OFFSET_MS);
@@ -529,7 +550,7 @@ export function startAlertEngine({
       }
 
       // Only log/send when signal triggers (dedup by instrument + candle start)
-      if (candleClosed && isGreen && prevEmaCloseToOpen && (close > emaCurr)) {
+      if (candleClosed && isGreen && emaIntersectsCandle && closedAboveEma) {
         const alertId = `${instrumentKey}::${candleStartTs}`;
         if (sentAlerts.has(alertId)) {
           continue;

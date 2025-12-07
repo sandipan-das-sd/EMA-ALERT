@@ -314,26 +314,32 @@ async function main() {
       const inMarketHours = afterMarketOpen && beforeMarketLastStart;
       const candleClosed = now >= candleEndTs;
       const isGreen = r.close > r.open;
-      const tol = isFO
-        ? Math.max(0.0001, r.open * foTolPercent, foTolAbs)
-        : Math.max(0.0001, r.open * baseTolPercent);
-      // If emaAtOpen is missing (first EMA point), fall back to emaAtClose for evaluation
-      const emaOpenEffective =
-        r.emaAtOpen !== null ? r.emaAtOpen : r.emaAtClose;
+      // Determine instrument details if available to detect options
+      let inst = null;
+      try {
+        // Note: this script only has the key string; we can't access instrumentsSearchService here
+        inst = null;
+      } catch (e) {
+        inst = null;
+      }
+      const tradingSymbol = "";
+      const isOption = false; // Not available in this script without instrument lookup
+
+      const tolPercentForIntersect = isFO
+        ? (isOption ? Math.min(foTolPercent, 0.005) : foTolPercent)
+        : baseTolPercent;
+      const absTolForIntersect = isFO ? (isOption ? Math.max(0.01, foTolAbs / 100) : foTolAbs) : 0.0001;
+      const tolIntersect = Math.max(0.0001, r.open * tolPercentForIntersect, absTolForIntersect);
+
+      const emaOpenEffective = r.emaAtOpen !== null ? r.emaAtOpen : r.emaAtClose;
       const usedEmaFallback = r.emaAtOpen === null && r.emaAtClose !== null;
 
-      const prevEmaCloseToOpen =
+      const emaIntersectsCandle =
         emaOpenEffective !== null
-          ? Math.abs(emaOpenEffective - r.open) <= tol
+          ? emaOpenEffective >= (r.low - tolIntersect) && emaOpenEffective <= (r.high + tolIntersect)
           : false;
-      const closedAboveEma =
-        r.emaAtClose !== null ? r.close > r.emaAtClose : false;
-      const signal =
-        candleClosed &&
-        isGreen &&
-        prevEmaCloseToOpen &&
-        closedAboveEma &&
-        inMarketHours;
+      const closedAboveEma = r.emaAtClose !== null ? r.close > r.emaAtClose : false;
+      const signal = candleClosed && isGreen && emaIntersectsCandle && closedAboveEma && inMarketHours;
       return {
         ...r,
         candleClosed,
