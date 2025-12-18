@@ -346,7 +346,15 @@ async function start() {
           }
         } catch {}
 
-  feed = createUpstoxFeed({ apiBase, accessToken: tokenStore.current, instrumentKeys: uniqueKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
+  feed = createUpstoxFeed({ 
+    apiBase, 
+    accessToken: tokenStore.current, 
+    getAccessToken: () => tokenStore.current,
+    instrumentKeys: uniqueKeys, 
+    mode, 
+    instrumentsSearchService, 
+    separator: chosenFormat === 'pipe' ? '|' : ':' 
+  });
       feed.on('ready', () => {
         feedReady = true;
         console.log('Upstox market feed connected');
@@ -478,6 +486,7 @@ async function start() {
           feed = createUpstoxFeed({ 
             apiBase, 
             accessToken: updatedAccessToken, 
+            getAccessToken: () => tokenStore.current,
             instrumentKeys: uniqueKeys, 
             mode, 
             instrumentsSearchService, 
@@ -607,7 +616,15 @@ async function start() {
             }
           } catch (e) { console.warn('[DynamicSub] Error closing old feed:', e.message); }
 
-          feed = createUpstoxFeed({ apiBase, accessToken: tokenStore.current, instrumentKeys: finalKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
+          feed = createUpstoxFeed({ 
+            apiBase, 
+            accessToken: tokenStore.current, 
+            getAccessToken: () => tokenStore.current,
+            instrumentKeys: finalKeys, 
+            mode, 
+            instrumentsSearchService, 
+            separator: chosenFormat === 'pipe' ? '|' : ':' 
+          });
           feed.on('ready', () => {
             feedReady = true;
             console.log('Upstox market feed connected (dynamic update)');

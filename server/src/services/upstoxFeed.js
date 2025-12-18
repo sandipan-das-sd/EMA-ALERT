@@ -42,6 +42,7 @@ async function authorizeSocket(apiBase, accessToken) {
 export function createUpstoxFeed({
   apiBase,
   accessToken,
+  getAccessToken, // NEW: optional function to get current token dynamically
   instrumentKeys,
   mode = "ltpc",
   instrumentsSearchService = null,
@@ -52,6 +53,9 @@ export function createUpstoxFeed({
   let closed = false;
   let proto;
   let ready = false;
+
+  // Support both static token and dynamic getter
+  const getToken = getAccessToken || (() => accessToken);
 
   // Decide preferred separator based on input keys when auto
   function decideSeparator(keys) {
@@ -201,7 +205,7 @@ export function createUpstoxFeed({
   async function connect() {
     try {
       if (!proto) proto = await loadProto();
-      const wssUrl = await authorizeSocket(apiBase, accessToken);
+      const wssUrl = await authorizeSocket(apiBase, getToken());
       ws = new WebSocket(wssUrl);
 
       ws.on("open", () => {
