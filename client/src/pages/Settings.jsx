@@ -14,10 +14,13 @@ export default function Settings() {
     setLoading(true);
     
     try {
+      console.log('[Settings] Updating Upstox access token...');
       const result = await updateUpstoxToken(upstoxAccessToken);
-      setMessage(result.message || 'Token updated successfully');
+      console.log('[Settings] Token update response:', result);
+      setMessage(result.message || 'Token updated successfully! Server is reconnecting...');
       setUpstoxAccessToken('');
     } catch (err) {
+      console.error('[Settings] Token update error:', err);
       setError(err.message || 'Failed to update token');
     } finally {
       setLoading(false);
@@ -83,6 +86,16 @@ export default function Settings() {
           <p className="text-xs text-blue-700 mt-2">
             Note: Access tokens typically expire after 24 hours. You'll need to update it daily.
           </p>
+        </div>
+        
+        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded">
+          <h3 className="font-medium text-amber-900 mb-2">📌 Important:</h3>
+          <ul className="list-disc list-inside text-sm text-amber-800 space-y-1">
+            <li>The server will automatically reconnect when you update the token</li>
+            <li>You should see a success message when reconnection is complete</li>
+            <li>Check the browser console (F12) for connection details</li>
+            <li>If you still see errors, verify your token is valid and not expired</li>
+          </ul>
         </div>
       </div>
     </div>

@@ -52,8 +52,21 @@ router.post('/login', async (req, res) => {
     
     // Update upstox access token if provided
     if (upstoxAccessToken !== undefined) {
+      const oldTokenLength = user.upstoxAccessToken?.length || 0;
       user.upstoxAccessToken = upstoxAccessToken;
       await user.save();
+      console.log(`[Login] User ${email} provided Upstox token (old: ${oldTokenLength} chars, new: ${upstoxAccessToken?.length || 0} chars)`);
+      
+      // Emit event to trigger reconnection if token changed
+      if (upstoxAccessToken && upstoxAccessToken !== user.upstoxAccessToken) {
+        try {
+          const { serverEvents } = await import('../index.js');
+          serverEvents.emit('upstox-token-updated', upstoxAccessToken);
+          console.log('[Login] Server reconnection event emitted');
+        } catch (e) {
+          console.warn('[Login] Could not emit reconnection event:', e.message);
+        }
+      }
     }
     
   setTokenCookie(res, user._id.toString());
@@ -86,12 +99,27 @@ router.put('/upstox-token', async (req, res) => {
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
+    const oldTokenLength = user.upstoxAccessToken?.length || 0;
     user.upstoxAccessToken = upstoxAccessToken || '';
     await user.save();
     
-    res.json({ message: 'Upstox token updated', hasUpstoxToken: !!user.upstoxAccessToken });
+    console.log(`[Token Update] User ${user.email} updated Upstox token (old: ${oldTokenLength} chars, new: ${upstoxAccessToken?.length || 0} chars)`);
+    
+    // Emit event to trigger reconnection
+    try {
+      const { serverEvents } = await import('../index.js');
+      serverEvents.emit('upstox-token-updated', upstoxAccessToken);
+      console.log('[Token Update] Server reconnection event emitted');
+    } catch (e) {
+      console.warn('[Token Update] Could not emit reconnection event:', e.message);
+    }
+    
+    res.json({ 
+      message: 'Upstox token updated successfully. Server will reconnect with new token.', 
+      hasUpstoxToken: !!user.upstoxAccessToken 
+    });
   } catch (e) {
-    console.error(e);
+    console.error('[Token Update] Error:', e);
     res.status(500).json({ message: 'Server error' });
   }
 });

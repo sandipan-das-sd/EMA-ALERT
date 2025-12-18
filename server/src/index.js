@@ -24,10 +24,14 @@ import { fileURLToPath } from 'url';
 import { marketState } from './services/marketState.js';
 import { loadInstrumentMaster, loadInstrumentJsonMaster, resolveInstrumentKey } from './services/instruments.js';
 import User from './models/User.js';
+import EventEmitter from 'events';
 
 dotenv.config();
 
 const app = express();
+
+// Global event emitter for server-wide events
+export const serverEvents = new EventEmitter();
 
 // Middleware
 app.use(helmet({
@@ -424,6 +428,122 @@ async function start() {
       });
       // Removed gainers/losers broadcast per user request
       poller.on('error', (e) => console.error('Upstox poller error:', e.message));
+      
+      // Listen for token updates to reconnect with new token
+      serverEvents.on('upstox-token-updated', async (newToken) => {
+        console.log('[Token Update] Received new token, reconnecting feed and poller...');
+        try {
+          // Close existing connections
+          if (feed && typeof feed.close === 'function') {
+            feed.close();
+            console.log('[Token Update] Closed old feed connection');
+          }
+          if (poller && typeof poller.stop === 'function') {
+            poller.stop();
+            console.log('[Token Update] Stopped old poller');
+          }
+          
+          // Update accessToken variable
+          const updatedAccessToken = newToken;
+          
+          // Get current subscription keys
+          const allKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
+          let uniqueKeys = Array.from(new Set(allKeys.filter(Boolean)));
+          
+          // Map and format keys (same logic as initial setup)
+          uniqueKeys = uniqueKeys.map(key => {
+            if (key.includes('INE')) {
+              const universeItem = resolvedUniverse.find(u => u.instrumentKey === key);
+              if (universeItem?.symbol) {
+                return `NSE_EQ:${universeItem.symbol}`;
+              }
+            }
+            return key;
+          });
+          
+          uniqueKeys = uniqueKeys.map(k => (chosenFormat === 'pipe' ? k.replace(/:/g, '|') : k.replace(/\|/g, ':')));
+          uniqueKeys = Array.from(new Set(uniqueKeys)).slice(0, 200);
+          
+          console.log(`[Token Update] Reconnecting with ${uniqueKeys.length} instruments`);
+          
+          // Recreate feed with new token
+          feed = createUpstoxFeed({ 
+            apiBase, 
+            accessToken: updatedAccessToken, 
+            instrumentKeys: uniqueKeys, 
+            mode, 
+            instrumentsSearchService, 
+            separator: chosenFormat === 'pipe' ? '|' : ':' 
+          });
+          
+          feed.on('ready', () => {
+            feedReady = true;
+            console.log('[Token Update] Feed reconnected successfully');
+            wss.clients.forEach(c => {
+              if (c.readyState === 1) c.send(JSON.stringify({ type: 'info', message: 'Market feed reconnected with new token' }));
+            });
+          });
+          
+          feed.on('price', (tick) => {
+            const originalKey = symbolToOriginalKey[tick.instrumentKey] || tick.instrumentKey;
+            const mappedTick = { ...tick, instrumentKey: originalKey };
+            marketState.lastTicks[originalKey] = mappedTick;
+            const payload = JSON.stringify({ type: 'tick', ...mappedTick });
+            wss.clients.forEach((client) => { if (client.readyState === 1) client.send(payload); });
+          });
+          
+          feed.on('error', (err) => {
+            const payload = JSON.stringify({ type: 'error', message: String(err.message || err) });
+            wss.clients.forEach((client) => { if (client.readyState === 1) client.send(payload); });
+            console.error('[Token Update] Feed error:', err);
+          });
+          
+          feed.on('subStatus', (st) => {
+            console.log(`[Token Update] Subscription OK: ${st.success.length}, errors: ${st.errors.length}`);
+            lastSubStatus = st;
+            const payload = JSON.stringify({ type: 'subStatus', data: st });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+          });
+          
+          // Recreate poller with new token
+          poller = startUpstoxPoller({
+            accessToken: updatedAccessToken,
+            apiBase,
+            instrumentKeys: allKeys,
+            intervalMs: pollIntervalMs,
+            batchSize: Number(process.env.UPSTOX_LTP_BATCH) || 50,
+            universeMapping: buildUniverseMapping(),
+            instrumentsSearchService
+          });
+          
+          poller.on('quotes', (quotes) => {
+            console.log(`[Poller] Received ${quotes.length} quotes, ${quotes.filter(q => !q.missing).length} with prices`);
+            quotes.forEach(q => { if(!q.missing && typeof q.ltp === 'number') marketState.latestQuotes[q.key] = q; });
+            const indicesSnapshot = indexKeys.map(key => ({
+              key,
+              ltp: marketState.latestQuotes[key]?.ltp ?? null,
+              cp: marketState.latestQuotes[key]?.cp ?? null,
+              changePct: marketState.latestQuotes[key]?.changePct ?? null,
+            }));
+            const payload = JSON.stringify({ type: 'indices', data: indicesSnapshot });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+            const qPayload = JSON.stringify({ type: 'quotes', data: quotes });
+            wss.clients.forEach(c => { if (c.readyState === 1) c.send(qPayload); });
+          });
+          
+          poller.on('error', (e) => console.error('[Token Update] Poller error:', e.message));
+          
+          console.log('[Token Update] Reconnection complete');
+        } catch (e) {
+          console.error('[Token Update] Failed to reconnect:', e);
+          wss.clients.forEach(c => {
+            if (c.readyState === 1) c.send(JSON.stringify({ 
+              type: 'error', 
+              message: 'Failed to reconnect with new token. Please check token validity.' 
+            }));
+          });
+        }
+      });
       
       // Set up dynamic subscription change handler
       dynamicSubscriptionManager.onSubscriptionChange(async (_newKeys) => {
