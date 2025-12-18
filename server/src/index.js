@@ -117,7 +117,12 @@ async function start() {
   const wss = new WebSocketServer({ server, path: '/ws/ticker' });
   wss.clients.forEach = wss.clients.forEach.bind(wss.clients); // defensive in some node/ws combos
     const apiBase = process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3';
-    const accessToken = await getActiveUpstoxToken();
+    
+    // Use mutable object to store access token so it can be updated dynamically
+    const tokenStore = {
+      current: await getActiveUpstoxToken()
+    };
+    let accessToken = tokenStore.current;
     
     if (!accessToken) {
       console.warn('⚠️  UPSTOX_ACCESS_TOKEN not found in environment variables or user database');
@@ -443,8 +448,11 @@ async function start() {
             console.log('[Token Update] Stopped old poller');
           }
           
-          // Update accessToken variable
+          // Update token in shared store and local variable
+          tokenStore.current = newToken;
+          accessToken = newToken;
           const updatedAccessToken = newToken;
+          console.log('[Token Update] Token store updated');
           
           // Get current subscription keys
           const allKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
@@ -667,7 +675,7 @@ async function start() {
     // Start alert engine in background (independent of WS)
     startAlertEngine({ 
       apiBase, 
-      accessToken, 
+      getAccessToken: () => tokenStore.current, // Pass function to get current token
       instrumentsSearchService, 
       dynamicSubscriptionManager, 
       intervalMs: 60_000,

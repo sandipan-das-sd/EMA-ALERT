@@ -124,6 +124,9 @@ export const PriceProvider = ({ children, user }) => {
                 setIndices(msg.indices);
               }
               break;
+            case 'info':
+              console.log('[WebSocket Info]:', msg.message);
+              break;
             case 'error':
               console.error('WebSocket error:', msg.message);
               break;

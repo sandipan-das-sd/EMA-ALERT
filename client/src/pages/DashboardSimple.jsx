@@ -82,7 +82,11 @@ export default function Dashboard({ user, setUser }) {
             });
             setTicks((prev) => ({ ...prev, ...map }));
             break;
+          case "info":
+            console.log('[Dashboard Info]:', msg.message);
+            break;
           case "error":
+            console.error('[Dashboard Error]:', msg.message);
             setNifty((s) => ({ ...s, error: msg.message }));
             break;
         }

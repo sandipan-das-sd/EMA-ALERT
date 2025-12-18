@@ -50,13 +50,17 @@ function calculateEMA(values, length = 20) {
 export function startAlertEngine({
   apiBase,
   accessToken,
+  getAccessToken, // NEW: function to get current token dynamically
   instrumentsSearchService,
   dynamicSubscriptionManager,
   intervalMs = 60_000,
   whatsappPhoneNumber,
   broadcastAlert, // optional: function to push alerts to WS clients
 }) {
-  if (!accessToken) {
+  // Support both static token and dynamic token getter
+  const getToken = getAccessToken || (() => accessToken);
+  
+  if (!getToken()) {
     console.warn("[AlertEngine] Disabled: missing UPSTOX_ACCESS_TOKEN");
     return { stop: () => {} };
   }
@@ -80,11 +84,12 @@ export function startAlertEngine({
       });
   }
 
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
+  // Function to get current headers with latest token
+  const getHeaders = () => ({
+    Authorization: `Bearer ${getToken()}`,
     Accept: "application/json",
     "Content-Type": "application/json",
-  };
+  });
 
   const stopRef = { stopped: false };
   const workingKeyCache = new Map(); // originalKey -> working intraday key
@@ -165,7 +170,7 @@ export function startAlertEngine({
       try {
         const url = buildHistoricalURL(instrumentKey, date);
         console.log(`[AlertEngine] Requesting historical: ${url}`);
-        const r = await fetch(url, { headers });
+        const r = await fetch(url, { headers: getHeaders() });
 
         if (r.ok) {
           const j = await r.json();
@@ -228,7 +233,7 @@ export function startAlertEngine({
       try {
         const url = buildIntradayURL(v);
 
-        const r = await fetch(url, { headers });
+        const r = await fetch(url, { headers: getHeaders() });
 
         if (r.status === 404) {
           continue; // Try next variant
@@ -666,7 +671,7 @@ export function startAlertEngine({
               // Try cached working key first
               if (workingKey) {
                 const url = buildIntradayURL(workingKey);
-                const r = await fetch(url, { headers });
+                const r = await fetch(url, { headers: getHeaders() });
 
                 if (r.ok) {
                   const j = await r.json();
