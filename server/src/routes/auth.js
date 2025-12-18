@@ -32,7 +32,7 @@ router.post('/signup', async (req, res) => {
     if (existing) return res.status(409).json({ message: 'Email already in use' });
     const user = await User.create({ name, email, password });
   setTokenCookie(res, user._id.toString());
-  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [] } });
+  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: false } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -41,7 +41,7 @@ router.post('/signup', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, upstoxAccessToken } = req.body;
     if (!email || !password) {
       return res.status(400).json({ message: 'Email & password required' });
     }
@@ -49,8 +49,15 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
     const match = await user.comparePassword(password);
     if (!match) return res.status(401).json({ message: 'Invalid credentials' });
+    
+    // Update upstox access token if provided
+    if (upstoxAccessToken !== undefined) {
+      user.upstoxAccessToken = upstoxAccessToken;
+      await user.save();
+    }
+    
   setTokenCookie(res, user._id.toString());
-  res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [] } });
+  res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -66,6 +73,29 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
+router.put('/upstox-token', async (req, res) => {
+  try {
+    const token = req.cookies[process.env.COOKIE_NAME];
+    if (!token) return res.status(401).json({ message: 'Not authenticated' });
+    
+    const { verifyToken } = await import('../utils/jwt.js');
+    const decoded = verifyToken(token);
+    if (!decoded) return res.status(401).json({ message: 'Invalid token' });
+    
+    const { upstoxAccessToken } = req.body;
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    user.upstoxAccessToken = upstoxAccessToken || '';
+    await user.save();
+    
+    res.json({ message: 'Upstox token updated', hasUpstoxToken: !!user.upstoxAccessToken });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 router.get('/me', async (req, res) => {
   const token = req.cookies[process.env.COOKIE_NAME];
   if (!token) return res.status(200).json({ user: null });
@@ -73,9 +103,9 @@ router.get('/me', async (req, res) => {
   import('../utils/jwt.js').then(({ verifyToken }) => {
     const decoded = verifyToken(token);
     if (!decoded) return res.status(200).json({ user: null });
-      User.findById(decoded.id).then((user) => {
+      User.findById(decoded.id).select('+upstoxAccessToken').then((user) => {
         if (!user) return res.status(200).json({ user: null });
-        res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [] } });
+        res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
     });
   });
 });

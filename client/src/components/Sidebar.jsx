@@ -22,6 +22,7 @@ export default function Sidebar() {
         {item('/watchlist', 'Watchlist')}
         {item('/notes', 'Notes')}
         {item('/notifications', 'Notifications')}
+        {item('/settings', 'Settings')}
       </nav>
     </aside>
   );

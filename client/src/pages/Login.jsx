@@ -5,6 +5,7 @@ import { login } from '../lib/api.js';
 export default function Login({ onAuthed }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [upstoxAccessToken, setUpstoxAccessToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -13,7 +14,7 @@ export default function Login({ onAuthed }) {
     setError('');
     setLoading(true);
     try {
-      const user = await login(email, password);
+      const user = await login(email, password, upstoxAccessToken);
       onAuthed(user);
     } catch (e) {
       setError(e.message);
@@ -35,6 +36,10 @@ export default function Login({ onAuthed }) {
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">Upstox Access Token (Optional)</label>
+            <input className="input" type="text" value={upstoxAccessToken} onChange={(e) => setUpstoxAccessToken(e.target.value)} placeholder="Paste your Upstox access token here" />
           </div>
           <button className="btn-primary w-full" disabled={loading}>{loading ? 'Logging in…' : 'Log in'}</button>
         </form>

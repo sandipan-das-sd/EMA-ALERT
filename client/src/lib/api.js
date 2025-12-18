@@ -27,8 +27,8 @@ export async function signup(name, email, password) {
   return data.user;
 }
 
-export async function login(email, password) {
-  const data = await request('/api/auth/login', { method: 'POST', body: { email, password } });
+export async function login(email, password, upstoxAccessToken = '') {
+  const data = await request('/api/auth/login', { method: 'POST', body: { email, password, upstoxAccessToken } });
   return data.user;
 }
 
@@ -48,6 +48,11 @@ export async function logout() {
   } catch {
     // ignore logout errors
   }
+}
+
+export async function updateUpstoxToken(upstoxAccessToken) {
+  const data = await request('/api/auth/upstox-token', { method: 'PUT', body: { upstoxAccessToken } });
+  return data;
 }
 
 // Watchlist APIs

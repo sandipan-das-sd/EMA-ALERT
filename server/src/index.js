@@ -23,6 +23,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { marketState } from './services/marketState.js';
 import { loadInstrumentMaster, loadInstrumentJsonMaster, resolveInstrumentKey } from './services/instruments.js';
+import User from './models/User.js';
 
 dotenv.config();
 
@@ -47,6 +48,30 @@ app.use(cors({
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+// Helper function to get active Upstox access token
+async function getActiveUpstoxToken() {
+  // First try environment variable
+  const envToken = process.env.UPSTOX_ACCESS_TOKEN;
+  if (envToken) {
+    console.log('[Token] Using Upstox access token from environment');
+    return envToken;
+  }
+  
+  // Try to find a user with a token
+  try {
+    const user = await User.findOne({ upstoxAccessToken: { $exists: true, $ne: '' } }).select('+upstoxAccessToken');
+    if (user && user.upstoxAccessToken) {
+      console.log(`[Token] Using Upstox access token from user: ${user.email}`);
+      return user.upstoxAccessToken;
+    }
+  } catch (e) {
+    console.warn('[Token] Error retrieving user token:', e.message);
+  }
+  
+  console.warn('[Token] No Upstox access token found in environment or database');
+  return null;
+}
 
 app.use('/api/auth', authRouter);
 app.use('/api/watchlist', watchlistRouter);
@@ -88,12 +113,12 @@ async function start() {
   const wss = new WebSocketServer({ server, path: '/ws/ticker' });
   wss.clients.forEach = wss.clients.forEach.bind(wss.clients); // defensive in some node/ws combos
     const apiBase = process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3';
-    const accessToken = process.env.UPSTOX_ACCESS_TOKEN;
+    const accessToken = await getActiveUpstoxToken();
     
     if (!accessToken) {
-      console.warn('⚠️  UPSTOX_ACCESS_TOKEN not found in environment variables');
+      console.warn('⚠️  UPSTOX_ACCESS_TOKEN not found in environment variables or user database');
       console.warn('   Real-time price data will not be available');
-      console.warn('   Please create a .env file with valid Upstox API credentials');
+      console.warn('   Please add your Upstox access token during login or in .env file');
       console.warn('   See .env.example for required configuration');
     }
     

@@ -21,6 +21,11 @@ const userSchema = new mongoose.Schema(
       minlength: 8,
       select: false,
     },
+    upstoxAccessToken: {
+      type: String,
+      default: '',
+      select: false,
+    },
     // Array of instrument keys like "NSE_EQ|ABB"
     watchlist: {
       type: [String],
