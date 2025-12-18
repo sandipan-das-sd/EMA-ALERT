@@ -243,7 +243,7 @@ async function start() {
         for (const variant of variants) {
           try {
             const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(variant)}`;
-            const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } });
+            const resp = await fetch(url, { headers: { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' } });
             if (!resp.ok) continue;
             const j = await resp.json();
             if (j?.data && Object.keys(j.data).length) {
@@ -346,7 +346,7 @@ async function start() {
           }
         } catch {}
 
-  feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: uniqueKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
+  feed = createUpstoxFeed({ apiBase, accessToken: tokenStore.current, instrumentKeys: uniqueKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
       feed.on('ready', () => {
         feedReady = true;
         console.log('Upstox market feed connected');
@@ -399,7 +399,7 @@ async function start() {
       };
 
       let poller = startUpstoxPoller({
-        accessToken,
+        accessToken: tokenStore.current,
         apiBase,
         instrumentKeys: currentSubscriptionKeys,
         intervalMs: pollIntervalMs,
@@ -607,7 +607,7 @@ async function start() {
             }
           } catch (e) { console.warn('[DynamicSub] Error closing old feed:', e.message); }
 
-          feed = createUpstoxFeed({ apiBase, accessToken, instrumentKeys: finalKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
+          feed = createUpstoxFeed({ apiBase, accessToken: tokenStore.current, instrumentKeys: finalKeys, mode, instrumentsSearchService, separator: chosenFormat === 'pipe' ? '|' : ':' });
           feed.on('ready', () => {
             feedReady = true;
             console.log('Upstox market feed connected (dynamic update)');
@@ -640,7 +640,7 @@ async function start() {
           try { if (poller && typeof poller.stop === 'function') poller.stop(); } catch (e) { console.warn('[DynamicSub] Error stopping old poller:', e.message); }
           // Restart poller with the full set of subscription keys (untrimmed) so it can try mappings
           poller = startUpstoxPoller({
-            accessToken,
+            accessToken: tokenStore.current,
             apiBase,
             instrumentKeys: allKeys,
             intervalMs: pollIntervalMs,
@@ -724,7 +724,7 @@ async function start() {
           // Fetch in manageable batches
           const chunk = (arr, size) => arr.reduce((acc, _, i) => (i % size ? acc : [...acc, arr.slice(i, i + size)]), []);
           const batches = chunk(keys, Number(process.env.UPSTOX_LTP_BATCH) || 50);
-          const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+          const headers = { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' };
           const responses = await Promise.all(batches.map(async group => {
             const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(group.join(','))}`;
             const r = await fetch(url, { headers });
@@ -755,7 +755,7 @@ async function start() {
         const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(candidate)}`;
         if (process.env.DEBUG_UPSTOX) console.log('[LTP] Request', url);
         const r = await fetch(url, {
-          headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+          headers: { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' },
         });
         if (process.env.DEBUG_UPSTOX) console.log('[LTP] Status', r.status);
         if (!r.ok) {
@@ -773,11 +773,11 @@ async function start() {
         }
         // If still not found and we had a plain symbol, attempt dynamic resolve and retry once
         if (!quoteObj && isPlainSymbol) {
-          const dynamicKey = await resolveInstrumentKey({ apiBase, accessToken, symbol: instrument });
+          const dynamicKey = await resolveInstrumentKey({ apiBase, accessToken: tokenStore.current, symbol: instrument });
           if (dynamicKey && dynamicKey !== candidate) {
             const retryUrl = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(dynamicKey)}`;
             if (process.env.DEBUG_UPSTOX) console.log('[LTP] Retry', retryUrl);
-            const rr = await fetch(retryUrl, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } });
+            const rr = await fetch(retryUrl, { headers: { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' } });
             if (rr.ok) {
               const retryData = await rr.json();
               const retryMap = retryData?.data || {};
@@ -878,7 +878,7 @@ async function start() {
           console.log('[Test LTP] URL:', url);
           
           const response = await fetch(url, {
-            headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+            headers: { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' }
           });
           
           const data = await response.json();
@@ -891,7 +891,7 @@ async function start() {
           });
         }
         
-        res.json({ results, accessTokenPresent: !!accessToken, apiBase });
+        res.json({ results, accessTokenPresent: !!tokenStore.current, apiBase });
       } catch (e) {
         res.status(500).json({ message: 'LTP test failed', error: e.message });
       }
@@ -907,7 +907,7 @@ async function start() {
       const equityColon = `NSE_EQ:${sampleEquity}`;
       // Prefer first index key as control
       const indexKey = indexKeys[0];
-      const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+      const headers = { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' };
       async function hitLtp(key) {
         try {
           const u = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(key)}`;
@@ -952,7 +952,7 @@ async function start() {
       const apiV2Base = process.env.UPSTOX_API_V2_BASE || 'https://api.upstox.com/v2';
       const url = `${apiV2Base}/market/status/${encodeURIComponent(exchange)}`;
       const headers = { Accept: 'application/json' };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+      if (tokenStore.current) headers.Authorization = `Bearer ${tokenStore.current}`;
       let json = null;
       let status = 500;
       try {
@@ -981,7 +981,7 @@ async function start() {
     // Debug route to inspect current state
     app.get('/api/debug/status', (req, res) => {
       const status = {
-        accessTokenPresent: !!accessToken,
+        accessTokenPresent: !!tokenStore.current,
         apiBase,
         universeCount: resolvedUniverse.length,
         universeKeys: universeKeys.slice(0, 5),
@@ -1091,7 +1091,7 @@ async function start() {
             console.log(`[Debug FO] Testing URL: ${url}`);
             
             const response = await fetch(url, {
-              headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
+              headers: { Authorization: `Bearer ${tokenStore.current}`, Accept: 'application/json' }
             });
             
             const data = await response.json();
