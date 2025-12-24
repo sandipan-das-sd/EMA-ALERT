@@ -8,7 +8,6 @@ const PROTO_URL =
   "https://assets.upstox.com/feed/market-data-feed/v3/MarketDataFeed.proto";
 
 async function loadProto() {
-  // Fetch remote .proto file manually (protobuf.load expects local path)
   const res = await fetch(PROTO_URL);
   if (!res.ok) throw new Error(`Failed to fetch proto: ${res.status}`);
   const protoText = await res.text();
@@ -20,33 +19,46 @@ async function loadProto() {
   return { root, FeedResponse };
 }
 
-async function authorizeSocket(apiBase, accessToken) {
+async function authorizeSocket(apiBase, getAccessToken) {
+  const currentToken = typeof getAccessToken === 'function' ? getAccessToken() : getAccessToken;
   const url = `${apiBase}/feed/market-data-feed/authorize`;
+  
+  console.log('[Upstox Auth] Requesting WebSocket URL...');
+  console.log('[Upstox Auth] API Base:', apiBase);
+  console.log('[Upstox Auth] Token present:', !!currentToken);
+  
   const res = await fetch(url, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${currentToken}`,
       Accept: "application/json",
     },
   });
+  
   if (!res.ok) {
     const text = await res.text();
+    console.error(`[Upstox Auth] Failed: ${res.status}`, text);
     throw new Error(`Upstox authorize failed: ${res.status} ${text}`);
   }
+  
   const data = await res.json();
+  console.log('[Upstox Auth] Full response:', JSON.stringify(data, null, 2));
+  
   const wss = data?.data?.authorized_redirect_uri;
   if (!wss) throw new Error("No authorized_redirect_uri in response");
+  
+  console.log('[Upstox Auth] WebSocket URL obtained:', wss);
   return wss;
 }
 
 export function createUpstoxFeed({
   apiBase,
   accessToken,
-  getAccessToken, // NEW: optional function to get current token dynamically
+  getAccessToken,
   instrumentKeys,
   mode = "ltpc",
   instrumentsSearchService = null,
-  separator = "auto", // '|' or ':' or 'auto'
+  separator = "auto",
 }) {
   const emitter = new EventEmitter();
   let ws;
@@ -54,28 +66,22 @@ export function createUpstoxFeed({
   let proto;
   let ready = false;
 
-  // Support both static token and dynamic getter
   const getToken = getAccessToken || (() => accessToken);
 
-  // Decide preferred separator based on input keys when auto
   function decideSeparator(keys) {
     if (separator === "|" || separator === ":") return separator;
-    // Auto-detect: prefer the most common separator in provided keys
-    let pipe = 0,
-      colon = 0;
+    let pipe = 0, colon = 0;
     for (const k of keys) {
       if (k.includes("|")) pipe++;
       if (k.includes(":")) colon++;
     }
-    if (pipe >= colon) return "|";
-    return ":";
+    return pipe >= colon ? "|" : ":";
   }
 
-  // Transform FO keys to the format expected by the WebSocket feed, preserving separator style
   function transformFOKeys(keys) {
     const sep = decideSeparator(keys);
     const transformed = [];
-    const reverseMapping = new Map(); // transformed key -> original key
+    const reverseMapping = new Map();
 
     keys.forEach((key) => {
       let transformedKey = key;
@@ -88,9 +94,7 @@ export function createUpstoxFeed({
           const parts = key.split(/[\|:]/);
           if (parts.length === 2) {
             const segment = parts[0];
-            // Build normalized FO symbol variants (spaces removed + date permutations)
             const buildFOSymbolVariants = (inst) => {
-              // Build candidate underlyings from trading symbol first token and name/shortName
               const tsToken =
                 (inst.tradingSymbol || "").split(" ")[0]?.toUpperCase?.() || "";
               const snToken =
@@ -131,18 +135,8 @@ export function createUpstoxFeed({
                   ? strikeRaw
                   : Number(strikeRaw || 0);
               const monNames = [
-                "JAN",
-                "FEB",
-                "MAR",
-                "APR",
-                "MAY",
-                "JUN",
-                "JUL",
-                "AUG",
-                "SEP",
-                "OCT",
-                "NOV",
-                "DEC",
+                "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
               ];
               let dt = null;
               try {
@@ -175,17 +169,14 @@ export function createUpstoxFeed({
               return Array.from(variants).filter(Boolean);
             };
             const foVariants = buildFOSymbolVariants(instrument);
-            // Prefer weekly/day-inclusive for options, monthly for futures; else first variant
             let preferred =
               foVariants[0] || instrument.tradingSymbol.replace(/\s+/g, "");
             if (!/FUT/i.test(preferred)) {
-              // Prefer ymd-like, then ym1d-like
               const ymd3 = foVariants.find((v) => /\d{2}[A-Z]{3}\d{2}/.test(v));
               const ymd1 = foVariants.find((v) => /\d{2}[A-Z]{1}\d{2}/.test(v));
               preferred = ymd3 || ymd1 || preferred;
             }
             transformedKey = `${segment}${sep}${preferred}`;
-            // Map all variants back as well to be safe
             reverseMapping.set(transformedKey, key);
             foVariants.forEach((v) =>
               reverseMapping.set(`${segment}${sep}${v}`, key)
@@ -204,52 +195,42 @@ export function createUpstoxFeed({
 
   async function connect() {
     try {
+      console.log('[Upstox Feed] Connecting...');
       if (!proto) proto = await loadProto();
-      const wssUrl = await authorizeSocket(apiBase, getToken());
+      
+      const wssUrl = await authorizeSocket(apiBase, getToken);
+      console.log('[Upstox Feed] Creating WebSocket connection...');
+      
+      // CRITICAL FIX: Don't add Authorization header to WebSocket connection
+      // The authorization is embedded in the URL itself
       ws = new WebSocket(wssUrl);
 
       ws.on("open", () => {
+        console.log('[Upstox Feed] ✓ WebSocket connected successfully');
         const guid = uuidv4().replace(/-/g, "").slice(0, 20);
-        // Transform FO keys for proper subscription
         const { transformed: transformedKeys, reverseMapping } =
           transformFOKeys(instrumentKeys);
-        // Store reverse mapping for later use
         ws._keyMapping = reverseMapping;
 
-        // Upstox v3 expects snake_case: instrument_keys
         const sub = {
           guid,
           method: "sub",
           data: { mode, instrument_keys: transformedKeys },
         };
         const jsonPayload = JSON.stringify(sub);
-        console.log("[Upstox] WebSocket opened, sending subscription...");
-        console.log(
-          `[Upstox] Subscribing to ${transformedKeys.length} keys in ${mode} mode`
-        );
-        if (process.env.LOG_UPSTOX_DEBUG) {
-          console.log("[Upstox] Subscription payload:", jsonPayload);
-          console.log(
-            "[Upstox] First 5 instrument keys:",
-            transformedKeys.slice(0, 5)
-          );
-          if (
-            transformedKeys.length !== instrumentKeys.length ||
-            Array.from(reverseMapping.values()).some((orig) =>
-              transformedKeys.some((trans) => trans !== orig)
-            )
-          ) {
-            console.log(
-              "[Upstox] Key transformation applied for FO instruments"
-            );
-          }
+        console.log(`[Upstox Feed] Subscribing to ${transformedKeys.length} instruments in ${mode} mode`);
+        
+        if (process.env.DEBUG_UPSTOX) {
+          console.log("[Upstox Feed] First 5 keys:", transformedKeys.slice(0, 5));
         }
+        
         try {
           ws.send(jsonPayload);
+          console.log('[Upstox Feed] ✓ Subscription request sent');
         } catch (e) {
-          console.error("[Upstox] JSON subscription send failed:", e.message);
+          console.error("[Upstox Feed] ✗ Subscription send failed:", e.message);
         }
-        // Attempt a binary subscription (best-effort; request proto may differ)
+        
         try {
           const possible = [
             "com.upstox.marketdatafeederv3udapi.rpc.proto.Request",
@@ -271,32 +252,21 @@ export function createUpstoxFeed({
             });
             const bin = reqType.encode(msgObj).finish();
             ws.send(Buffer.from(bin));
-            if (process.env.LOG_UPSTOX_DEBUG)
-              console.log(
-                "[Upstox] Sent binary subscription frame (length)",
-                bin.length
-              );
-          } else {
-            if (process.env.LOG_UPSTOX_DEBUG)
-              console.log(
-                "[Upstox] Request proto type not found; binary subscribe skipped"
-              );
+            if (process.env.DEBUG_UPSTOX)
+              console.log("[Upstox Feed] ✓ Binary subscription sent (length)", bin.length);
           }
         } catch (e) {
-          if (process.env.LOG_UPSTOX_DEBUG)
-            console.log(
-              "[Upstox] Binary subscription attempt failed:",
-              e.message
-            );
+          if (process.env.DEBUG_UPSTOX)
+            console.log("[Upstox Feed] Binary subscription skipped:", e.message);
         }
       });
 
       ws.on("message", (data, isBinary) => {
         if (!isBinary && typeof data === "string") {
           const lower = data.toLowerCase();
-          if (lower.includes("ping")) return; // heartbeat
-          if (process.env.LOG_UPSTOX_DEBUG)
-            console.log("[Upstox] Text frame received (len)", data.length);
+          if (lower.includes("ping")) return;
+          if (process.env.DEBUG_UPSTOX)
+            console.log("[Upstox Feed] Text frame (len)", data.length);
         }
         try {
           const buf = isBinary ? data : Buffer.from(data);
@@ -304,10 +274,9 @@ export function createUpstoxFeed({
           if (!ready) {
             ready = true;
             emitter.emit("ready");
-            if (process.env.LOG_UPSTOX_DEBUG)
-              console.log("[Upstox] First protobuf frame type:", msg.type);
+            console.log('[Upstox Feed] ✓ Ready - receiving data');
           }
-          // Subscription status handling (success/errors)
+          
           if (msg?.subscription) {
             const succ = Object.keys(msg.subscription.success || {});
             const errs = msg.subscription.errors || {};
@@ -316,31 +285,16 @@ export function createUpstoxFeed({
               reason: String(v?.message || v || "unknown"),
             }));
             if (succ.length || errEntries.length) {
-              if (process.env.LOG_UPSTOX_DEBUG) {
-                console.log(
-                  "[Upstox] Subscribed ok:",
-                  succ.length,
-                  "errors:",
-                  errEntries.length
-                );
-                if (errEntries.length)
-                  console.log(
-                    "[Upstox] Subscription errors sample:",
-                    errEntries.slice(0, 5)
-                  );
+              console.log(`[Upstox Feed] Subscribed: ${succ.length} ok, ${errEntries.length} errors`);
+              if (errEntries.length && process.env.DEBUG_UPSTOX) {
+                console.log("[Upstox Feed] Error sample:", errEntries.slice(0, 3));
               }
               emitter.emit("subStatus", { success: succ, errors: errEntries });
             }
           }
+          
           if (msg?.feeds) {
-            if (process.env.LOG_UPSTOX_DEBUG) {
-              console.log(
-                "[Upstox] Feed keys received:",
-                Object.keys(msg.feeds)
-              );
-            }
             Object.entries(msg.feeds).forEach(([key, feedObj]) => {
-              // Map the received key back to the original format for FO instruments
               const originalKey = ws._keyMapping?.get(key) || key;
               const isSubscribed =
                 instrumentKeys.includes(originalKey) ||
@@ -356,7 +310,7 @@ export function createUpstoxFeed({
                 const ts = Number(msg.currentTs || Date.now());
 
                 const tickData = {
-                  instrumentKey: originalKey, // Use original key for frontend consistency
+                  instrumentKey: originalKey,
                   ltp,
                   ts,
                   changePct: cp && cp > 0 ? ((ltp - cp) / cp) * 100 : null,
@@ -364,47 +318,56 @@ export function createUpstoxFeed({
                 };
 
                 emitter.emit("price", tickData);
-                if (process.env.LOG_UPSTOX_DEBUG)
-                  console.log("[Upstox] Tick", key, "->", originalKey, ltp);
-              } else if (process.env.LOG_UPSTOX_DEBUG && isSubscribed) {
-                console.log(
-                  "[Upstox] Feed received but no valid LTP for",
-                  key,
-                  ":",
-                  JSON.stringify(feedObj).slice(0, 200)
-                );
               }
             });
-          } else if (process.env.LOG_UPSTOX_DEBUG) {
-            console.log("[Upstox] Frame decoded but no feeds field");
           }
         } catch (e) {
-          if (process.env.LOG_UPSTOX_DEBUG) {
-            const len = Buffer.isBuffer(data)
-              ? data.length
-              : data?.byteLength || 0;
-            console.log("[Upstox] Frame undecodable, length", len, e.message);
+          if (process.env.DEBUG_UPSTOX) {
+            console.log("[Upstox Feed] Decode error:", e.message);
           }
         }
       });
 
       ws.on("error", (err) => {
+        console.error('[Upstox Feed] ✗ WebSocket error:', err.message);
+        
+        // Check if it's a 403 - might be an entitlement issue
+        if (err.message.includes('403')) {
+          console.error('[Upstox Feed] ✗ 403 Forbidden - Possible causes:');
+          console.error('  1. WebSocket streaming not enabled in your Upstox account');
+          console.error('  2. Token lacks websocket permissions');
+          console.error('  3. Account subscription level insufficient');
+          console.error('  → Falling back to HTTP polling only');
+          
+          // Emit a special event so the server can handle it gracefully
+          emitter.emit("websocket-disabled");
+          closed = true; // Don't retry if it's a 403
+        }
+        
         emitter.emit("error", err);
       });
 
-      ws.on("close", () => {
+      ws.on("close", (code, reason) => {
+        console.log(`[Upstox Feed] WebSocket closed: ${code} ${reason || ''}`);
+        ready = false;
         if (closed) return;
-        setTimeout(connect, 1000);
+        console.log('[Upstox Feed] Reconnecting in 2 seconds...');
+        setTimeout(connect, 2000);
       });
     } catch (e) {
+      console.error('[Upstox Feed] ✗ Connection error:', e.message);
       emitter.emit("error", e);
-      setTimeout(connect, 2000);
+      if (!closed) {
+        console.log('[Upstox Feed] Retrying in 3 seconds...');
+        setTimeout(connect, 3000);
+      }
     }
   }
 
   connect();
 
   emitter.close = () => {
+    console.log('[Upstox Feed] Closing connection...');
     closed = true;
     if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   };
