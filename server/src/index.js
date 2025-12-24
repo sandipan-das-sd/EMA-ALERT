@@ -371,6 +371,39 @@ async function start() {
           if (client.readyState === 1) client.send(payload);
         });
       });
+
+      // Add this code after creating the feed (around line 180 in your index.js)
+
+feed.on('websocket-disabled', () => {
+  console.warn('⚠️  WebSocket streaming is not available for your account');
+  console.warn('   The system will continue using HTTP polling for price updates');
+  console.warn('   HTTP polling is working correctly (as shown in logs)');
+  console.warn('   Contact Upstox support to enable WebSocket streaming if needed');
+  
+  feedReady = false; // Mark feed as not ready
+  
+  // Notify connected clients
+  const payload = JSON.stringify({ 
+    type: 'info', 
+    message: 'Real-time WebSocket feed unavailable. Using HTTP polling for price updates.' 
+  });
+  wss.clients.forEach(c => { 
+    if (c.readyState === 1) c.send(payload); 
+  });
+});
+
+// Also update the error handler to be less noisy for 403s
+feed.on('error', (err) => {
+  // Only log non-403 errors to reduce noise
+  if (!err.message.includes('403')) {
+    const payload = JSON.stringify({ type: 'error', message: String(err.message || err) });
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) client.send(payload);
+    });
+    console.error('Upstox feed error:', err);
+  }
+});
+
       feed.on('error', (err) => {
         const payload = JSON.stringify({ type: 'error', message: String(err.message || err) });
         wss.clients.forEach((client) => {
@@ -696,7 +729,6 @@ async function start() {
       instrumentsSearchService, 
       dynamicSubscriptionManager, 
       intervalMs: 60_000,
-      whatsappPhoneNumber: process.env.WHATSAPP_PHONE_NUMBER,
       broadcastAlert: (alert) => {
         const payload = JSON.stringify({ type: 'alert', alert });
         try {
