@@ -16,6 +16,8 @@ const alertSchema = new mongoose.Schema(
       close: Number,
     },
     ema: { type: Number },
+    crossDetectedAt: { type: Date }, // When the alert engine detected the cross
+    notificationSentAt: { type: Date }, // When the notification was sent
     status: { type: String, enum: ['active', 'dismissed'], default: 'active', index: true },
     createdAt: { type: Date, default: Date.now },
   },

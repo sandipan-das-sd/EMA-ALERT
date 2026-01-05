@@ -442,10 +442,12 @@ export function startAlertEngine({
         }
         
         sentAlerts.add(alertId);
+        const crossDetectedAt = Date.now(); // Track when we detected the cross
         console.log(
           `\n🎯 [AlertEngine] SIGNAL for ${instrumentKey} at ${startIstStr}\n` +
           `   Open: ${open.toFixed(2)} | Close: ${close.toFixed(2)} | EMA: ${emaOpenEffective.toFixed(5)}\n` +
-          `   High: ${high.toFixed(2)} | Low: ${low.toFixed(2)}`
+          `   High: ${high.toFixed(2)} | Low: ${low.toFixed(2)}\n` +
+          `   Cross detected at: ${new Date(crossDetectedAt).toISOString()}`
         );
         
         signals.push({
@@ -455,6 +457,7 @@ export function startAlertEngine({
           low,
           close,
           ema: emaOpenEffective,
+          crossDetectedAt, // Add detection timestamp
         });
       }
     }
@@ -622,6 +625,9 @@ export function startAlertEngine({
               for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
                 if (watchlistSet && watchlistSet.has(instrumentKey)) {
                   try {
+                    const notificationSentAt = Date.now();
+                    const delaySec = Math.round((notificationSentAt - sig.crossDetectedAt) / 1000);
+                    console.log(`[AlertEngine] Notification sent for ${instrumentKey} - Delay: ${delaySec}s`);
                     broadcastAlert({
                       userId,
                       instrumentKey,
@@ -636,6 +642,8 @@ export function startAlertEngine({
                         close: sig.close 
                       },
                       ema: sig.ema,
+                      crossDetectedAt: sig.crossDetectedAt,
+                      notificationSentAt,
                       createdAt: new Date().toISOString(),
                     });
                   } catch (e) {
@@ -658,6 +666,7 @@ export function startAlertEngine({
             if (!isStillMember) continue;
 
             for (const sig of sigs) {
+              const notificationSentAt = Date.now();
               ops.push(
                 Alert.updateOne(
                   {
@@ -680,6 +689,8 @@ export function startAlertEngine({
                         close: sig.close,
                       },
                       ema: sig.ema,
+                      crossDetectedAt: new Date(sig.crossDetectedAt),
+                      notificationSentAt: new Date(notificationSentAt),
                       status: "active",
                       createdAt: new Date(),
                     },

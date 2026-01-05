@@ -728,7 +728,7 @@ feed.on('error', (err) => {
       getAccessToken: () => tokenStore.current, // Pass function to get current token
       instrumentsSearchService, 
       dynamicSubscriptionManager, 
-      intervalMs: 60_000,
+      intervalMs: 15_000, // Check every 15 seconds for faster notification
       broadcastAlert: (alert) => {
         const payload = JSON.stringify({ type: 'alert', alert });
         try {
