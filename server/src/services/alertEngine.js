@@ -1,5 +1,6 @@
 import fetch from "node-fetch";
 import Alert from "../models/Alert.js";
+import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -609,11 +610,16 @@ export function startAlertEngine({
       if (keyToSignal.size > 0) {
         console.log(`\n[AlertEngine] Creating ${keyToSignal.size} alert(s)...`);
         
+        // Get WhatsApp phone numbers once
+        const whatsappNumbers = getWhatsAppPhoneNumbers();
+        
         if (typeof broadcastAlert === 'function') {
           for (const [instrumentKey, signals] of keyToSignal) {
             let instrumentName = instrumentKey;
+            let instrument = null;
+            
             try {
-              const instrument = instrumentsSearchService.getInstrument(instrumentKey);
+              instrument = instrumentsSearchService.getInstrument(instrumentKey);
               if (instrument) {
                 instrumentName = instrument.tradingSymbol || instrument.name || instrumentKey;
               }
@@ -646,6 +652,18 @@ export function startAlertEngine({
                       notificationSentAt,
                       createdAt: new Date().toISOString(),
                     });
+                    
+                    // Send WhatsApp notification
+                    if (whatsappNumbers.length > 0) {
+                      sendWhatsAppAlert({
+                        instrumentName: instrumentName, // Full instrument name (e.g., NIFTY13SEP2020CE)
+                        close: sig.close,
+                        ema: sig.ema,
+                        phoneNumbers: whatsappNumbers
+                      }).catch(err => {
+                        console.error(`[AlertEngine] WhatsApp notification failed:`, err.message);
+                      });
+                    }
                   } catch (e) {
                     console.warn(`[AlertEngine] Broadcast failed:`, e?.message);
                   }
