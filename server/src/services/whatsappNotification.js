@@ -45,6 +45,9 @@ export async function sendWhatsAppAlert({
     // Prepare message with instrument full name
     const message = `EMA Alert: ${instrumentName} - Close: ${close?.toFixed(2)}, EMA: ${ema?.toFixed(2)}`;
     
+    // MSG91 template has 15 character limit for body_1 parameter
+    const instrumentNameTruncated = instrumentName.substring(0, 15);
+    
     const payload = {
       "integrated_number": integratedNumber,
       "content_type": "template",
@@ -64,12 +67,12 @@ export async function sendWhatsAppAlert({
               "components": {
                 "body_1": {
                   "type": "text",
-                  "value": instrumentName // Full instrument name like NIFTY13SEP2020CE
+                  "value": instrumentNameTruncated // Truncated to 15 chars (template limit)
                 },
                 "button_1": {
                   "subtype": "url",
                   "type": "text",
-                  "value": "" // URL variable if needed
+                  "value": "trade"
                 }
               }
             }
