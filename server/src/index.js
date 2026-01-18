@@ -34,24 +34,30 @@ const app = express();
 export const serverEvents = new EventEmitter();
 
 // Middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-app.use(express.json());
-app.use(cookieParser());
-app.use(morgan('dev'));
+// CORS must come before other middleware
 app.use(cors({
   origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://trade.gyanoda.in', 'https://nifty.gyanoda.in'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
   exposedHeaders: ['Set-Cookie'],
-  maxAge: 86400
+  maxAge: 86400,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+app.use(express.json());
+app.use(cookieParser());
+app.use(morgan('dev'));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 // Helper function to get active Upstox access token
 async function getActiveUpstoxToken() {
