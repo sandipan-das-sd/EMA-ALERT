@@ -74,6 +74,9 @@ export function startAlertEngine({
   const historicalCache = new Map();
   const sentAlerts = new Set();
   
+  // Track tick count for reduced logging
+  let tickCount = 0;
+  
   // Track last cleanup to prevent memory leak
   let lastCleanupDate = toIstDateString(Date.now());
   
@@ -498,14 +501,17 @@ export function startAlertEngine({
 
       const keysToProcess = allKeys.filter((k) => !permanentlyFailed.has(k));
 
-      console.log(
-        `\n[AlertEngine] ===== TICK ${new Date().toISOString()} =====`
-      );
-      console.log(
-        `[AlertEngine] Monitoring ${keysToProcess.length}/${allKeys.length} instruments`
-      );
+      tickCount++;
+      const shouldLog = tickCount % 10 === 1; // Only log every 10th tick
+      
+      if (shouldLog) {
+        console.log(
+          `[AlertEngine] Tick #${tickCount}: Monitoring ${keysToProcess.length}/${allKeys.length} instruments (${permanentlyFailed.size} failed)`
+        );
+      }
 
       if (keysToProcess.length === 0) {
+        if (shouldLog) console.log('[AlertEngine] No instruments to monitor');
         return setTimeout(tick, intervalMs);
       }
 
@@ -747,13 +753,11 @@ export function startAlertEngine({
         if (ops.length) {
           const results = await Promise.allSettled(ops);
           const successful = results.filter((r) => r.status === "fulfilled").length;
-          console.log(`[AlertEngine] ✓ ${successful}/${ops.length} alerts saved`);
+          if (shouldLog || successful > 0) {
+            console.log(`[AlertEngine] ✓ ${successful}/${ops.length} alerts saved`);
+          }
         }
-      } else {
-        console.log("[AlertEngine] No signals detected");
       }
-
-      console.log(`[AlertEngine] ===== TICK END =====\n`);
     } catch (e) {
       console.error("[AlertEngine] Tick error:", e.message);
       console.error(e.stack);

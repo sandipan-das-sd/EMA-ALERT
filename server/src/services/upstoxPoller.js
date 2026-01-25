@@ -13,6 +13,8 @@ export function startUpstoxPoller({
 }) {
   const emitter = new EventEmitter();
   let stopped = false;
+  let pollCount = 0; // Track poll iterations
+  const failedInstruments = new Set(); // Track permanently failed instruments
 
   function chunk(arr, size) {
     const out = [];
@@ -22,14 +24,17 @@ export function startUpstoxPoller({
 
   async function tick() {
     if (stopped) return;
+    pollCount++;
+    const shouldLog = pollCount % 10 === 1; // Only log every 10th poll to reduce spam
+    
     try {
       // Upstox LTP endpoint likely has subscription limits per request; fetch in batches
-      const allKeys = instrumentKeys.filter(Boolean);
-      console.log(
-        `[Upstox Poller] Polling ${allKeys.length} instruments, batch size: ${batchSize}`
-      );
-      if (process.env.DEBUG_UPSTOX && allKeys.length > 0) {
-        console.log("[Upstox Poller] Sample keys:", allKeys.slice(0, 3));
+      const allKeys = instrumentKeys.filter(Boolean).filter(k => !failedInstruments.has(k));
+      
+      if (shouldLog) {
+        console.log(
+          `[Upstox Poller] Poll #${pollCount}: ${allKeys.length} instruments (${failedInstruments.size} skipped)`
+        );
       }
 
       const batches = chunk(allKeys, batchSize);
@@ -37,31 +42,20 @@ export function startUpstoxPoller({
         Authorization: `Bearer ${accessToken}`,
         Accept: "application/json",
       };
+      
+      let successCount = 0;
+      let failureCount = 0;
       const results = await Promise.all(
         batches.map(async (group, batchIdx) => {
           const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(
             group.join(",")
           )}`;
-          if (process.env.DEBUG_UPSTOX && batchIdx === 0) {
-            console.log("[Upstox Poller] First batch URL:", url);
-          }
           const res = await fetch(url, { headers });
           if (!res.ok) {
-            if (process.env.DEBUG_UPSTOX) {
-              console.warn(
-                `[Upstox Poller] Batch ${batchIdx} failed: ${res.status}`
-              );
-            }
             return { data: {} };
           }
           try {
             const json = await res.json();
-            if (process.env.DEBUG_UPSTOX && batchIdx === 0) {
-              console.log(
-                "[Upstox Poller] First batch response keys:",
-                Object.keys(json?.data || {})
-              );
-            }
             return json;
           } catch {
             return { data: {} };
@@ -121,11 +115,7 @@ export function startUpstoxPoller({
             for (const variant of segmentVariants) {
               q = merged[variant] || merged[variant.replace(":", "|")];
               if (q) {
-                if (process.env.DEBUG_UPSTOX) {
-                  console.log(
-                    `[Poller] ISIN->Symbol mapping: ${key} -> ${variant} = ₹${q.last_price}`
-                  );
-                }
+                successCount++;
                 break;
               }
             }
@@ -259,11 +249,7 @@ export function startUpstoxPoller({
                 for (const variant of allVariants) {
                   q = merged[variant];
                   if (q) {
-                    if (process.env.DEBUG_UPSTOX) {
-                      console.log(
-                        `[Poller] FO variant match: ${key} -> ${variant} = ₹${q.last_price}`
-                      );
-                    }
+                    successCount++;
                     break;
                   }
                 }
@@ -278,11 +264,7 @@ export function startUpstoxPoller({
                 for (const variant of simpleVariants) {
                   q = merged[variant];
                   if (q) {
-                    if (process.env.DEBUG_UPSTOX) {
-                      console.log(
-                        `[Poller] FO simple match: ${key} -> ${variant} = ₹${q.last_price}`
-                      );
-                    }
+                    successCount++;
                     break;
                   }
                 }
@@ -299,25 +281,13 @@ export function startUpstoxPoller({
         }
 
         if (!q) {
-          if (process.env.DEBUG_UPSTOX && !key.includes("INDEX")) {
-            console.log(
-              `[Poller] No price found for ${key}, tried variants:`,
-              variants.slice(0, 3)
-            );
-            // Log if it's a FO instrument to help debug
-            if (
-              key.includes("FO") ||
-              key.includes("FUT") ||
-              key.includes("CE") ||
-              key.includes("PE")
-            ) {
-              console.log(
-                `[Poller] FO instrument ${key} not found. Available response keys:`,
-                Object.keys(merged)
-                  .filter((k) => k.includes("FO") || /\d{6,}/.test(k))
-                  .slice(0, 10)
-              );
-            }
+          failureCount++;
+          // Track failed instruments - after 5 consecutive failures, stop trying
+          const failKey = `fail_count_${key}`;
+          if (!emitter[failKey]) emitter[failKey] = 0;
+          emitter[failKey]++;
+          if (emitter[failKey] >= 5) {
+            failedInstruments.add(key);
           }
           return { key, missing: true };
         }
@@ -334,6 +304,13 @@ export function startUpstoxPoller({
           matched: q ? "found" : "missing",
         };
       });
+      
+      // Log summary only every 10th poll
+      if (shouldLog) {
+        const present = quotes.filter(q => !q.missing);
+        console.log(`[Poller] Summary: ${present.length}/${quotes.length} found | Failed: ${failureCount} | Skipped: ${failedInstruments.size}`);
+      }
+      
       emitter.emit("quotes", quotes);
       // Compute gainers/losers excluding missing
       const present = quotes.filter(
