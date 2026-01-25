@@ -33,6 +33,24 @@ const app = express();
 // Global event emitter for server-wide events
 export const serverEvents = new EventEmitter();
 
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('❌ [CRITICAL] Uncaught Exception:', error.message);
+  console.error(error.stack);
+  // Don't exit - try to continue running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [CRITICAL] Unhandled Promise Rejection:', reason);
+  if (reason instanceof Error) {
+    console.error(reason.stack);
+  }
+  // Don't exit - try to continue running
+});
+
+// Increase event emitter limit to prevent memory leak warnings
+serverEvents.setMaxListeners(50);
+
 // Middleware
 // CORS must come before other middleware
 app.use(cors({
@@ -746,17 +764,47 @@ feed.on('error', (err) => {
     });
 
     wss.on('connection', (socket) => {
+      // Limit concurrent WebSocket connections to prevent resource exhaustion
+      const currentConnections = wss.clients.size;
+      const maxConnections = parseInt(process.env.MAX_WS_CONNECTIONS) || 100;
+      
+      if (currentConnections > maxConnections) {
+        console.warn(`[WebSocket] Connection limit reached (${currentConnections}/${maxConnections})`);
+        socket.send(JSON.stringify({ 
+          type: 'error', 
+          message: 'Server connection limit reached. Please try again later.' 
+        }));
+        socket.close();
+        return;
+      }
+      
+      console.log(`[WebSocket] New connection (${currentConnections}/${maxConnections})`);
+      
       socket.send(JSON.stringify({ type: 'info', message: 'Connected to EMA-ALERT ticker' }));
       if (!accessToken) {
         socket.send(JSON.stringify({ type: 'error', message: 'Upstox access token not configured on server' }));
       }
+      
       // Send initial snapshot of universe prices
-      const initialQuotes = universeKeys.map(k => ({
-        key: k,
-        ltp: marketState.latestQuotes[k]?.ltp ?? marketState.lastTicks[k]?.ltp ?? null,
-        ts: marketState.latestQuotes[k]?.ts ?? marketState.lastTicks[k]?.ts ?? null,
-      }));
-      socket.send(JSON.stringify({ type: 'quotes', data: initialQuotes }));
+      try {
+        const initialQuotes = universeKeys.map(k => ({
+          key: k,
+          ltp: marketState.latestQuotes[k]?.ltp ?? marketState.lastTicks[k]?.ltp ?? null,
+          ts: marketState.latestQuotes[k]?.ts ?? marketState.lastTicks[k]?.ts ?? null,
+        }));
+        socket.send(JSON.stringify({ type: 'quotes', data: initialQuotes }));
+      } catch (e) {
+        console.error('[WebSocket] Error sending initial snapshot:', e.message);
+      }
+      
+      // Add error handler for individual socket
+      socket.on('error', (err) => {
+        console.error('[WebSocket] Socket error:', err.message);
+      });
+      
+      socket.on('close', () => {
+        console.log(`[WebSocket] Connection closed (${wss.clients.size} remaining)`);
+      });
     });
 
     // Simple REST fallback to read latest tick/status

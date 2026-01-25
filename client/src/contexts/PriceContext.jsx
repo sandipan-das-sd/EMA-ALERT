@@ -81,11 +81,29 @@ export const PriceProvider = ({ children, user }) => {
     const needsRealTime = needs.needsUniverse || needs.needsIndices || (needs.needsWatchlist && watchlist.length > 0);
 
     if (needsRealTime && user) {
+      // Prevent multiple connections
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        console.log('[PriceContext] WebSocket already connected, skipping');
+        return;
+      }
+      
+      // Close any existing connection first
+      if (wsConnection) {
+        try {
+          wsConnection.close();
+        } catch (e) {
+          console.warn('[PriceContext] Error closing existing WebSocket:', e);
+        }
+        setWsConnection(null);
+      }
+      
       // Start WebSocket connection
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const port = isLocalhost ? ':4000' : '';
       const url = `${proto}://${window.location.hostname}${port}/ws/ticker`;
+      
+      console.log('[PriceContext] Connecting to WebSocket:', url);
       const ws = new WebSocket(url);
 
       const handleMessage = (evt) => {
@@ -137,18 +155,22 @@ export const PriceProvider = ({ children, user }) => {
       };
 
       const handleOpen = () => {
-        console.log('WebSocket connected');
+        console.log('[PriceContext] WebSocket connected');
         setWsConnection(ws);
       };
 
       const handleClose = () => {
-        console.log('WebSocket disconnected');
-        setWsConnection(null);
+        console.log('[PriceContext] WebSocket disconnected');
+        if (wsConnection === ws) {
+          setWsConnection(null);
+        }
       };
 
       const handleError = (err) => {
-        console.error('WebSocket error:', err);
-        setWsConnection(null);
+        console.error('[PriceContext] WebSocket error:', err);
+        if (wsConnection === ws) {
+          setWsConnection(null);
+        }
       };
 
       ws.onmessage = handleMessage;
@@ -157,8 +179,13 @@ export const PriceProvider = ({ children, user }) => {
       ws.onerror = handleError;
 
       return () => {
-        ws.close();
-        setWsConnection(null);
+        console.log('[PriceContext] Cleanup: closing WebSocket');
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+        if (wsConnection === ws) {
+          setWsConnection(null);
+        }
       };
     } else {
       // Clean up when we don't need real-time data
@@ -179,8 +206,11 @@ export const PriceProvider = ({ children, user }) => {
     if (needsPolling) {
       setPolling(true);
       let cancelled = false;
+      let timeoutId = null;
 
       const pollOnce = async () => {
+        if (cancelled) return;
+        
         try {
           // Only poll for data we actually need based on current page
           const instrumentKeys = needs.needsUniverse 
@@ -189,7 +219,13 @@ export const PriceProvider = ({ children, user }) => {
             ? watchlist.map(w => w.key).filter(Boolean)
             : [];
 
-          if (instrumentKeys.length === 0) return;
+          if (instrumentKeys.length === 0) {
+            // Retry after delay if no instruments yet
+            if (!cancelled) {
+              timeoutId = setTimeout(pollOnce, 5000);
+            }
+            return;
+          }
 
           const batchSize = 50;
           const batches = [];
@@ -225,22 +261,23 @@ export const PriceProvider = ({ children, user }) => {
             setTicks(prev => ({ ...prev, ...quotesMap }));
           }
         } catch (e) {
-          console.error('Polling error:', e);
+          console.error('[PriceContext] Polling error:', e);
+        } finally {
+          // Schedule next poll
+          if (!cancelled) {
+            timeoutId = setTimeout(pollOnce, 10000); // Increased to 10s to reduce server load
+          }
         }
       };
 
-      const interval = setInterval(() => {
-        if (!cancelled) {
-          pollOnce();
-        }
-      }, 6000); // Poll every 6 seconds as fallback
-
-      // Initial poll
-      pollOnce();
+      // Start first poll after a small delay
+      timeoutId = setTimeout(pollOnce, 1000);
 
       return () => {
         cancelled = true;
-        clearInterval(interval);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         setPolling(false);
       };
     } else {

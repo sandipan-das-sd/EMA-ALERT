@@ -1,5 +1,9 @@
 import fetch from "node-fetch";
 
+// Track last sent time per instrument to prevent duplicate sends
+const lastSentTime = new Map();
+const COOLDOWN_MS = 60000; // 1 minute cooldown per instrument
+
 /**
  * Send WhatsApp notification via MSG91 API
  * @param {Object} params - Notification parameters
@@ -14,6 +18,15 @@ export async function sendWhatsAppAlert({
   ema, 
   phoneNumbers = [] 
 }) {
+  // Check cooldown to prevent spam
+  const now = Date.now();
+  const lastSent = lastSentTime.get(instrumentName);
+  if (lastSent && (now - lastSent) < COOLDOWN_MS) {
+    const remainingMs = COOLDOWN_MS - (now - lastSent);
+    console.log(`[WhatsApp] Cooldown active for ${instrumentName} (${Math.ceil(remainingMs/1000)}s remaining)`);
+    return { success: false, message: 'Cooldown active', cooldownRemaining: remainingMs };
+  }
+  
   // Check if WhatsApp is enabled
   if (process.env.WHATSAPP_ENABLED !== 'true') {
     console.log('[WhatsApp] Notifications disabled');
@@ -99,6 +112,17 @@ export async function sendWhatsAppAlert({
     
     if (response.ok) {
       console.log(`[WhatsApp] ✓ Message sent successfully:`, result);
+      // Update last sent time on success
+      lastSentTime.set(instrumentName, now);
+      
+      // Cleanup old entries (keep only last hour)
+      const oneHourAgo = now - 3600000;
+      for (const [key, time] of lastSentTime.entries()) {
+        if (time < oneHourAgo) {
+          lastSentTime.delete(key);
+        }
+      }
+      
       return { 
         success: true, 
         message: 'WhatsApp notification sent',

@@ -18,12 +18,23 @@ export function AlertProvider({ children, user }) {
   useEffect(() => {
     if (!user) { setActive([]); return; }
     let stop = false;
+    let wsInstance = null;
+    
     // Real-time: connect to WS for instant alerts
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const port = isLocalhost ? ':4000' : '';
     const url = `${proto}://${window.location.hostname}${port}/ws/ticker`;
+    
+    // Prevent multiple connections
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('[AlertContext] WebSocket already connected, reusing');
+      return;
+    }
+    
+    console.log('[AlertContext] Connecting to WebSocket for alerts');
     const ws = new WebSocket(url);
+    wsInstance = ws;
     wsRef.current = ws;
 
     ws.onmessage = async (evt) => {
@@ -90,12 +101,19 @@ export function AlertProvider({ children, user }) {
     };
     ws.onclose = () => { 
       console.log('[AlertContext] WebSocket disconnected');
-      wsRef.current = null; 
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
     };
     ws.onerror = (err) => {
       console.error('[AlertContext] WebSocket error:', err);
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
     };
     const poll = async () => {
+      if (stop) return;
+      
       try {
         const since = lastPoll.current ? lastPoll.current : undefined;
         const alerts = await listAlerts({ status: 'active', since });
@@ -148,9 +166,31 @@ export function AlertProvider({ children, user }) {
         console.error('[AlertContext] Error fetching alerts:', err);
       }
     };
-    const id = setInterval(poll, 15_000);
+    
+    // Reduced polling frequency to 30s to lower server load
+    const id = setInterval(() => {
+      if (!stop) {
+        poll();
+      }
+    }, 30000);
+    
+    // Initial poll
     poll();
-    return () => { stop = true; clearInterval(id); if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; } };
+    
+    return () => { 
+      stop = true; 
+      clearInterval(id); 
+      if (wsInstance && wsInstance.readyState === WebSocket.OPEN) { 
+        try { 
+          wsInstance.close(); 
+        } catch (e) {
+          console.warn('[AlertContext] Error closing WebSocket:', e);
+        }
+      }
+      if (wsRef.current === wsInstance) {
+        wsRef.current = null;
+      }
+    };
   }, [user]);
 
   async function dismiss(id) {

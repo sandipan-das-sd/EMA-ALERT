@@ -73,6 +73,20 @@ export function startAlertEngine({
   const permanentlyFailed = new Set();
   const historicalCache = new Map();
   const sentAlerts = new Set();
+  
+  // Track last cleanup to prevent memory leak
+  let lastCleanupDate = toIstDateString(Date.now());
+  
+  // Cleanup function to prevent memory leak
+  const cleanupDailyData = () => {
+    const today = toIstDateString(Date.now());
+    if (today && today !== lastCleanupDate) {
+      console.log(`[AlertEngine] Daily cleanup: clearing ${sentAlerts.size} sent alerts`);
+      sentAlerts.clear();
+      historicalCache.clear();
+      lastCleanupDate = today;
+    }
+  };
 
   const buildHistoricalURL = (instrumentKey, date) => {
     const base = apiBase.replace(/\/$/, "");
@@ -470,6 +484,9 @@ export function startAlertEngine({
     if (stopRef.stopped) return;
 
     try {
+      // Daily cleanup to prevent memory leak
+      cleanupDailyData();
+      
       const userMap = new Map();
       for (const [userId, wl] of dynamicSubscriptionManager.userWatchlists) {
         userMap.set(userId, Array.from(wl));
@@ -653,15 +670,22 @@ export function startAlertEngine({
                       createdAt: new Date().toISOString(),
                     });
                     
-                    // Send WhatsApp notification
+                    // Send WhatsApp notification IMMEDIATELY (don't wait)
                     if (whatsappNumbers.length > 0) {
+                      console.log(`[AlertEngine] Sending immediate WhatsApp for ${instrumentName}`);
                       sendWhatsAppAlert({
                         instrumentName: instrumentName, // Full instrument name (e.g., NIFTY13SEP2020CE)
                         close: sig.close,
                         ema: sig.ema,
                         phoneNumbers: whatsappNumbers
+                      }).then(result => {
+                        if (result.success) {
+                          console.log(`[AlertEngine] ✓ WhatsApp sent for ${instrumentName}`);
+                        } else {
+                          console.error(`[AlertEngine] ✗ WhatsApp failed for ${instrumentName}:`, result.message);
+                        }
                       }).catch(err => {
-                        console.error(`[AlertEngine] WhatsApp notification failed:`, err.message);
+                        console.error(`[AlertEngine] ✗ WhatsApp error for ${instrumentName}:`, err.message);
                       });
                     }
                   } catch (e) {
@@ -733,9 +757,18 @@ export function startAlertEngine({
     } catch (e) {
       console.error("[AlertEngine] Tick error:", e.message);
       console.error(e.stack);
+      // Clear temporary data on error to prevent corruption
+      try {
+        workingKeyCache.clear();
+        failureCount.clear();
+      } catch (cleanupErr) {
+        console.error("[AlertEngine] Cleanup error:", cleanupErr.message);
+      }
     } finally {
       if (!stopRef.stopped) {
-        setTimeout(tick, intervalMs);
+        // Add delay on error to prevent rapid crash loops
+        const delay = intervalMs;
+        setTimeout(tick, delay);
       }
     }
   }
