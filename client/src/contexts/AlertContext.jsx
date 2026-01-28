@@ -74,7 +74,8 @@ export function AlertProvider({ children, user }) {
           }
           
           const enriched = {
-            _id: a._id || `${a.userId}:${a.instrumentKey}:${a.candle?.ts || Date.now()}`, // synthetic id if missing
+            _id: a._id || a.id || `${a.userId}:${a.instrumentKey}:${a.candle?.ts || Date.now()}`, // Prefer real DB _id
+            userId: a.userId,
             instrumentKey: a.instrumentKey,
             instrumentName: instrumentName,
             timeframe: a.timeframe || '15m',
