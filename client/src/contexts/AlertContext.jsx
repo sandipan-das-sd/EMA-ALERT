@@ -115,7 +115,8 @@ export function AlertProvider({ children, user }) {
       if (stop) return;
       
       try {
-        const since = lastPoll.current ? lastPoll.current : undefined;
+        // Only use 'since' after first poll to get all existing alerts initially
+        const since = lastPoll.current > 0 ? lastPoll.current : undefined;
         const alerts = await listAlerts({ status: 'active', since });
         if (stop) return;
         if (alerts.length) {

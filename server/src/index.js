@@ -755,8 +755,15 @@ feed.on('error', (err) => {
       intervalMs: 15_000, // Check every 15 seconds for faster notification
       broadcastAlert: (alert) => {
         const payload = JSON.stringify({ type: 'alert', alert });
+        let broadcastCount = 0;
         try {
-          wss.clients.forEach(c => { if (c.readyState === 1) c.send(payload); });
+          wss.clients.forEach(c => { 
+            if (c.readyState === 1) {
+              c.send(payload);
+              broadcastCount++;
+            }
+          });
+          console.log(`[AlertEngine] ✓ Broadcast alert for ${alert.instrumentKey} to ${broadcastCount} client(s)`);
         } catch (e) {
           console.warn('[WS] Failed to broadcast alert:', e?.message || e);
         }

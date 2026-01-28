@@ -1,35 +1,107 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Sidebar from '../components/Sidebar.jsx';
-import { listAlerts, dismissAlert, getInstrument } from '../lib/api.js';
+import { listAlerts, dismissAlert, getInstrument, API_URL } from '../lib/api.js';
 
 export default function Notifications() {
   const [alerts, setAlerts] = useState([]);
   const [status, setStatus] = useState('active');
   const [instrumentNames, setInstrumentNames] = useState({});
+  const wsRef = useRef(null);
+
+  // Fetch instrument name helper
+  const fetchInstrumentName = async (instrumentKey) => {
+    try {
+      const instrument = await getInstrument(instrumentKey);
+      if (instrument) {
+        return instrument.tradingSymbol || instrument.name || instrumentKey;
+      }
+    } catch (err) {
+      console.error(`Failed to fetch instrument ${instrumentKey}:`, err);
+    }
+    return instrumentKey;
+  };
+
+  // Load alerts from API
+  const loadAlerts = async () => {
+    const alertList = await listAlerts({ status });
+    setAlerts(alertList);
+    
+    // Fetch instrument names for all alerts
+    const names = {};
+    await Promise.all(alertList.map(async (alert) => {
+      names[alert.instrumentKey] = await fetchInstrumentName(alert.instrumentKey);
+    }));
+    setInstrumentNames(names);
+  };
 
   useEffect(() => {
     let mounted = true;
-    listAlerts({ status }).then(async (alertList) => { 
+    loadAlerts().then(() => {
       if (!mounted) return;
-      setAlerts(alertList);
       
-      // Fetch instrument names for all alerts
-      const names = {};
-      await Promise.all(alertList.map(async (alert) => {
-        try {
-          const instrument = await getInstrument(alert.instrumentKey);
-          if (instrument) {
-            // For FO instruments, prioritize tradingSymbol which has the full contract details
-            names[alert.instrumentKey] = instrument.tradingSymbol || instrument.name || alert.instrumentKey;
+      // Setup WebSocket for real-time alerts
+      if (status === 'active') {
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = API_URL.replace(/^http/, 'ws') + '/ws/ticker';
+        
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        
+        ws.onmessage = async (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === 'alert' && msg.alert) {
+              const alert = msg.alert;
+              // Fetch instrument name
+              const name = await fetchInstrumentName(alert.instrumentKey);
+              
+              // Create alert object matching API format
+              const newAlert = {
+                _id: alert._id || `${alert.userId}:${alert.instrumentKey}:${alert.candle?.ts || Date.now()}`,
+                userId: alert.userId,
+                instrumentKey: alert.instrumentKey,
+                timeframe: alert.timeframe || '15m',
+                strategy: alert.strategy || 'ema20_cross_up',
+                candle: alert.candle,
+                ema: alert.ema,
+                status: 'active',
+                createdAt: alert.createdAt || new Date().toISOString(),
+                crossDetectedAt: alert.crossDetectedAt,
+                notificationSentAt: alert.notificationSentAt
+              };
+              
+              setAlerts(prev => {
+                // Check if alert already exists
+                if (prev.some(a => a._id === newAlert._id)) return prev;
+                return [newAlert, ...prev];
+              });
+              
+              setInstrumentNames(prev => ({
+                ...prev,
+                [alert.instrumentKey]: name
+              }));
+            }
+          } catch (err) {
+            console.error('[Notifications] WS error:', err);
           }
-        } catch (err) {
-          console.error(`Failed to fetch instrument ${alert.instrumentKey}:`, err);
-        }
-      }));
-      
-      if (mounted) {
-        setInstrumentNames(names);
+        };
+        
+        ws.onerror = (err) => console.error('[Notifications] WebSocket error:', err);
       }
+      
+      // Poll every 30 seconds for updates
+      const pollInterval = setInterval(() => {
+        if (mounted) loadAlerts();
+      }, 30000);
+      
+      return () => {
+        mounted = false;
+        clearInterval(pollInterval);
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
+        }
+      };
     });
     return () => { mounted = false; };
   }, [status]);
