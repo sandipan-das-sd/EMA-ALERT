@@ -461,11 +461,15 @@ export function startAlertEngine({
         
         sentAlerts.add(alertId);
         const crossDetectedAt = Date.now(); // Track when we detected the cross
+        const candleEndTime = candleEndTs;
+        const delayFromCandleClose = Math.round((crossDetectedAt - candleEndTime) / 1000);
         console.log(
           `\n🎯 [AlertEngine] SIGNAL for ${instrumentKey} at ${startIstStr}\n` +
           `   Open: ${open.toFixed(2)} | Close: ${close.toFixed(2)} | EMA: ${emaOpenEffective.toFixed(5)}\n` +
           `   High: ${high.toFixed(2)} | Low: ${low.toFixed(2)}\n` +
-          `   Cross detected at: ${new Date(crossDetectedAt).toISOString()}`
+          `   Candle closed: ${new Date(candleEndTime).toISOString()}\n` +
+          `   Cross detected at: ${new Date(crossDetectedAt).toISOString()}\n` +
+          `   ⏱️  Detection delay: ${delayFromCandleClose}s from candle close`
         );
         
         signals.push({
@@ -476,6 +480,7 @@ export function startAlertEngine({
           close,
           ema: emaOpenEffective,
           crossDetectedAt, // Add detection timestamp
+          candleEndTime, // Add candle close time for delay tracking
         });
       }
     }
@@ -636,6 +641,7 @@ export function startAlertEngine({
         // Get WhatsApp phone numbers once
         const whatsappNumbers = getWhatsAppPhoneNumbers();
         
+        // STEP 1: Send broadcasts and WhatsApp IMMEDIATELY
         if (typeof broadcastAlert === 'function') {
           for (const [instrumentKey, signals] of keyToSignal) {
             let instrumentName = instrumentKey;
@@ -655,8 +661,15 @@ export function startAlertEngine({
                 if (watchlistSet && watchlistSet.has(instrumentKey)) {
                   try {
                     const notificationSentAt = Date.now();
-                    const delaySec = Math.round((notificationSentAt - sig.crossDetectedAt) / 1000);
-                    console.log(`[AlertEngine] Notification sent for ${instrumentKey} - Delay: ${delaySec}s`);
+                    const delayFromDetection = Math.round((notificationSentAt - sig.crossDetectedAt) / 1000);
+                    const delayFromCandleClose = Math.round((notificationSentAt - sig.candleEndTime) / 1000);
+                    console.log(
+                      `[AlertEngine] 📤 Broadcasting ${instrumentKey}\n` +
+                      `   Delay from detection: ${delayFromDetection}s\n` +
+                      `   Delay from candle close: ${delayFromCandleClose}s`
+                    );
+                    
+                    // Broadcast to WebSocket immediately
                     broadcastAlert({
                       userId,
                       instrumentKey,
@@ -676,22 +689,24 @@ export function startAlertEngine({
                       createdAt: new Date().toISOString(),
                     });
                     
-                    // Send WhatsApp notification IMMEDIATELY (don't wait)
+                    // Send WhatsApp notification IMMEDIATELY (non-blocking)
                     if (whatsappNumbers.length > 0) {
-                      console.log(`[AlertEngine] Sending immediate WhatsApp for ${instrumentName}`);
+                      const whatsappStartTime = Date.now();
                       sendWhatsAppAlert({
-                        instrumentName: instrumentName, // Full instrument name (e.g., NIFTY13SEP2020CE)
+                        instrumentName: instrumentName,
                         close: sig.close,
                         ema: sig.ema,
                         phoneNumbers: whatsappNumbers
                       }).then(result => {
+                        const whatsappDuration = Date.now() - whatsappStartTime;
                         if (result.success) {
-                          console.log(`[AlertEngine] ✓ WhatsApp sent for ${instrumentName}`);
+                          console.log(`[AlertEngine] ✓ WhatsApp sent for ${instrumentName} (${whatsappDuration}ms)`);
                         } else {
                           console.error(`[AlertEngine] ✗ WhatsApp failed for ${instrumentName}:`, result.message);
                         }
                       }).catch(err => {
-                        console.error(`[AlertEngine] ✗ WhatsApp error for ${instrumentName}:`, err.message);
+                        const whatsappDuration = Date.now() - whatsappStartTime;
+                        console.error(`[AlertEngine] ✗ WhatsApp error for ${instrumentName} (${whatsappDuration}ms):`, err.message);
                       });
                     }
                   } catch (e) {
@@ -703,6 +718,7 @@ export function startAlertEngine({
           }
         }
 
+        // STEP 2: Save to database in background (non-blocking)
         const ops = [];
         for (const [userId, keys] of userMap) {
           for (const k of keys) {
@@ -750,12 +766,24 @@ export function startAlertEngine({
           }
         }
 
+        // Save to database without blocking (fire and forget with error handling)
         if (ops.length) {
-          const results = await Promise.allSettled(ops);
-          const successful = results.filter((r) => r.status === "fulfilled").length;
-          if (shouldLog || successful > 0) {
-            console.log(`[AlertEngine] ✓ ${successful}/${ops.length} alerts saved`);
-          }
+          const dbStartTime = Date.now();
+          Promise.allSettled(ops).then(results => {
+            const dbDuration = Date.now() - dbStartTime;
+            const successful = results.filter((r) => r.status === "fulfilled").length;
+            const failed = results.filter((r) => r.status === "rejected");
+            console.log(`[AlertEngine] 💾 Database: ${successful}/${ops.length} alerts saved (${dbDuration}ms)`);
+            if (failed.length > 0) {
+              console.error(`[AlertEngine] ⚠️  ${failed.length} database saves failed`);
+              failed.slice(0, 3).forEach((r, i) => {
+                console.error(`[AlertEngine]   Error ${i + 1}:`, r.reason?.message || r.reason);
+              });
+            }
+          }).catch(err => {
+            const dbDuration = Date.now() - dbStartTime;
+            console.error(`[AlertEngine] ❌ Database save error (${dbDuration}ms):`, err.message);
+          });
         }
       }
     } catch (e) {
