@@ -32,6 +32,41 @@ const parseExpiryParts = (rawExpiry) => {
   };
 };
 
+const inferOptionType = (instrument) => {
+  const direct = normalizeToken(instrument?.optionType);
+  if (direct === 'CE' || direct === 'PE') return direct;
+
+  const symbol = normalizeToken(instrument?.tradingSymbol);
+  if (/\bCE\b/.test(symbol)) return 'CE';
+  if (/\bPE\b/.test(symbol)) return 'PE';
+  return null;
+};
+
+const inferStrike = (instrument) => {
+  const direct = Number(instrument?.strike);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const symbol = String(instrument?.tradingSymbol || '');
+  const m = symbol.match(/\b(\d+(?:\.\d+)?)\s+(?:CE|PE)\b/i);
+  if (m && m[1]) {
+    const fromSymbol = Number(m[1]);
+    if (Number.isFinite(fromSymbol) && fromSymbol > 0) return fromSymbol;
+  }
+
+  return null;
+};
+
+const enrichInstrument = (instrument) => {
+  const optionType = inferOptionType(instrument);
+  const strike = inferStrike(instrument);
+
+  return {
+    ...instrument,
+    optionType: optionType || instrument?.optionType || null,
+    strike: strike ?? instrument?.strike ?? null,
+  };
+};
+
 const instrumentMatchesFilters = (instrument, filters) => {
   if (!instrument) return false;
 
@@ -131,7 +166,8 @@ router.get('/search', protect, async (req, res) => {
 
         return String(a.tradingSymbol || '').localeCompare(String(b.tradingSymbol || ''));
       })
-      .slice(0, safeLimit);
+      .slice(0, safeLimit)
+      .map((instrument) => enrichInstrument(instrument));
 
     if (String(debug) === '1') {
       console.log('[Instruments/search] Request:', {

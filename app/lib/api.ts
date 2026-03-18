@@ -21,6 +21,13 @@ export interface WatchlistItem {
   ts?: string | null;
 }
 
+export interface MarketIndexItem {
+  key: string;
+  ltp?: number | null;
+  cp?: number | null;
+  changePct?: number | null;
+}
+
 export interface InstrumentSearchItem {
   key: string;
   tradingSymbol: string;
@@ -126,6 +133,11 @@ export async function updateUpstoxToken(upstoxAccessToken: string) {
 export async function getWatchlist() {
   const data = await request("/watchlist");
   return (data?.watchlist || []) as WatchlistItem[];
+}
+
+export async function getMarketSnapshot() {
+  const data = await request('/market/snapshot');
+  return (data?.indices || []) as MarketIndexItem[];
 }
 
 export async function addToWatchlist(instrumentKey: string) {

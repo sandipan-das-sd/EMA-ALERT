@@ -48,6 +48,8 @@ export default function WatchlistScreen() {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
   const [mutatingKey, setMutatingKey] = useState<string | null>(null);
+  const normalizedUnderlying = underlying.trim().toUpperCase();
+  const hasValidUnderlying = normalizedUnderlying.length >= 3 && underlyings.includes(normalizedUnderlying);
 
   const watchlistKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
 
@@ -77,8 +79,7 @@ export default function WatchlistScreen() {
     const timer = setTimeout(async () => {
       try {
         setUnderlyingLoading(true);
-        const response = await getOptionUnderlyings({ segment, debug: true });
-        console.log('[Explore] underlyings response:', response);
+        const response = await getOptionUnderlyings({ segment, debug: false });
         const list = response.underlyings || [];
         setUnderlyings(list);
 
@@ -100,8 +101,8 @@ export default function WatchlistScreen() {
   }, [segment]);
 
   useEffect(() => {
-    const cleanedUnderlying = underlying.trim().toUpperCase();
-    if (!cleanedUnderlying) {
+    const cleanedUnderlying = normalizedUnderlying;
+    if (!cleanedUnderlying || !hasValidUnderlying) {
       setMeta(null);
       setSelectedYear(null);
       setSelectedMonth(null);
@@ -114,9 +115,8 @@ export default function WatchlistScreen() {
         setMetaLoading(true);
         const response = await getOptionFilterMeta(cleanedUnderlying, {
           segment,
-          debug: true,
+          debug: false,
         });
-        console.log('[Explore] options/meta response:', response);
         setMeta(response);
 
         const years = response.years || [];
@@ -140,7 +140,7 @@ export default function WatchlistScreen() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [underlying, segment]);
+  }, [normalizedUnderlying, segment, hasValidUnderlying]);
 
   const months = useMemo(() => {
     if (!meta || !selectedYear) return [] as number[];
@@ -174,7 +174,7 @@ export default function WatchlistScreen() {
   }, [days, selectedDay]);
 
   useEffect(() => {
-    if (!underlying.trim() || !selectedYear || !selectedMonth) {
+    if (!hasValidUnderlying || !selectedYear || !selectedMonth) {
       setResults([]);
       return;
     }
@@ -187,22 +187,12 @@ export default function WatchlistScreen() {
           query: query.trim() || undefined,
           segments: [segment],
           limit: 40,
-          underlying: underlying.trim().toUpperCase(),
+          underlying: normalizedUnderlying,
           expiryYear: selectedYear,
           expiryMonth: selectedMonth,
           expiryDay: selectedDay || undefined,
           optionType,
-          debug: true,
-        });
-        console.log('[Explore] search response:', {
-          count: found.length,
-          sample: found.slice(0, 5).map((x) => ({
-            key: x.key,
-            tradingSymbol: x.tradingSymbol,
-            expiry: x.expiry,
-            strike: x.strike,
-            optionType: x.optionType,
-          })),
+          debug: false,
         });
         setResults(found);
       } catch (e) {
@@ -213,7 +203,7 @@ export default function WatchlistScreen() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [query, segment, underlying, selectedYear, selectedMonth, selectedDay, optionType]);
+  }, [query, segment, normalizedUnderlying, hasValidUnderlying, selectedYear, selectedMonth, selectedDay, optionType]);
 
   async function onAdd(item: InstrumentSearchItem) {
     try {
@@ -303,6 +293,12 @@ export default function WatchlistScreen() {
           autoCapitalize="characters"
           style={[styles.searchInput, { color: palette.text, borderColor: palette.border }]}
         />
+
+        {!hasValidUnderlying && normalizedUnderlying.length > 0 ? (
+          <ThemedText style={{ color: palette.warning, fontSize: 12 }}>
+            Select a valid underlying from chips to load expiry dates.
+          </ThemedText>
+        ) : null}
 
         <View style={styles.inlineRowWrap}>
           {OPTION_TYPES.map((ot) => (
@@ -399,7 +395,7 @@ export default function WatchlistScreen() {
           <View style={styles.inlineRow}>
             <ActivityIndicator size="small" color={palette.accent} />
             <ThemedText style={{ color: palette.muted }}>
-              Searching {underlying.trim().toUpperCase()} contracts...
+              Searching {normalizedUnderlying} contracts...
             </ThemedText>
           </View>
         ) : null}
