@@ -898,6 +898,28 @@ feed.on('error', (err) => {
             }
           });
 
+          // Final fallback: retry unresolved keys individually and map returned quote to requested key.
+          const unresolvedKeys = keys.filter((k) => !normalized[k]);
+          if (unresolvedKeys.length > 0) {
+            await Promise.all(unresolvedKeys.map(async (requestedKey) => {
+              try {
+                const url = `${apiBase}/market-quote/ltp?instrument_key=${encodeURIComponent(requestedKey)}`;
+                const r = await fetch(url, { headers });
+                if (!r.ok) return;
+                const j = await r.json();
+                const map = j?.data || {};
+                const first = Object.values(map)[0];
+                if (first && typeof first === 'object') {
+                  normalized[requestedKey] = first;
+                  if (requestedKey.includes('|')) normalized[requestedKey.replace('|', ':')] = first;
+                  if (requestedKey.includes(':')) normalized[requestedKey.replace(':', '|')] = first;
+                }
+              } catch {
+                // Ignore per-key fallback errors
+              }
+            }));
+          }
+
           if (process.env.DEBUG_UPSTOX) {
             console.log('[LTP Batch] Requested keys:', keys.slice(0, 10));
             console.log('[LTP Batch] Returned keys:', Object.keys(merged).slice(0, 10));
