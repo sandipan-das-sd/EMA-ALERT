@@ -11,6 +11,10 @@ import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { showToast } from "@/lib/toast";
 
+const STOCK_BG_IMAGE = {
+  uri: "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=1600&q=80",
+};
+
 export default function LoginScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
@@ -39,70 +43,80 @@ export default function LoginScreen() {
   }
 
   return (
-    <SafeAreaView edges={["top", "bottom"]} style={[styles.safe, { backgroundColor: palette.background }]}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
-      <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
-        <ImageBackground
-          source={require('../assets/images/splash-icon.png')}
-          imageStyle={{ opacity: 0.14, borderRadius: 16 }}
-          style={[styles.brandCard, { borderColor: palette.border, backgroundColor: palette.card }]}
-        >
-          <ThemedText style={[styles.eyebrow, { color: palette.accent }]}>EMA ALERT SYSTEM</ThemedText>
-          <ThemedText type="title" style={styles.title}>Welcome Back</ThemedText>
-          <ThemedText style={[styles.subtitle, { color: palette.muted }]}>Log in to continue live market monitoring</ThemedText>
-        </ImageBackground>
+    <ImageBackground source={STOCK_BG_IMAGE} style={styles.bg}>
+      <View style={styles.bgOverlay} />
+      <SafeAreaView edges={["top", "bottom"]} style={[styles.safe, { backgroundColor: "transparent" }]}> 
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+        <ThemedView style={[styles.container, { backgroundColor: "transparent" }]}> 
+          <ImageBackground
+            source={require('../assets/images/splash-icon.png')}
+            imageStyle={{ opacity: 0.14, borderRadius: 16 }}
+            style={[styles.brandCard, { borderColor: palette.border, backgroundColor: "rgba(15, 29, 54, 0.88)" }]}
+          >
+            <ThemedText style={[styles.eyebrow, { color: palette.accent }]}>EMA ALERT SYSTEM</ThemedText>
+            <ThemedText type="title" style={[styles.title, { color: "#F8FBFF" }]}>Welcome Back</ThemedText>
+            <ThemedText style={[styles.subtitle, { color: "#C7D5EF" }]}>Log in to continue live market monitoring</ThemedText>
+          </ImageBackground>
 
-        {error ? <ThemedText style={[styles.error, { color: palette.danger }]}>{error}</ThemedText> : null}
+          {error ? <ThemedText style={[styles.error, { color: "#FF9BA6" }]}>{error}</ThemedText> : null}
 
-        <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
-          <TextInput
-            placeholder="Email"
-            placeholderTextColor={palette.muted}
-            value={email}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            onChangeText={setEmail}
-            style={[styles.input, { color: palette.text, borderColor: palette.border }]}
-          />
-          <View style={[styles.passwordWrap, { borderColor: palette.border }]}> 
+          <View style={[styles.card, { backgroundColor: "rgba(15, 29, 54, 0.88)", borderColor: "#2D4672" }]}> 
             <TextInput
-              placeholder="Password"
-              placeholderTextColor={palette.muted}
-              value={password}
-              secureTextEntry={!showPassword}
-              onChangeText={setPassword}
-              style={[styles.passwordInput, { color: palette.text }]}
+              placeholder="Email"
+              placeholderTextColor="#AFC3E6"
+              value={email}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              onChangeText={setEmail}
+              style={[styles.input, { color: "#F3F7FF", borderColor: "#2D4672" }]}
             />
-            <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={10}>
-              <Ionicons
-                name={showPassword ? "eye-off-outline" : "eye-outline"}
-                size={22}
-                color={palette.muted}
+            <View style={[styles.passwordWrap, { borderColor: "#2D4672" }]}> 
+              <TextInput
+                placeholder="Password"
+                placeholderTextColor="#AFC3E6"
+                value={password}
+                secureTextEntry={!showPassword}
+                onChangeText={setPassword}
+                style={[styles.passwordInput, { color: "#F3F7FF" }]}
               />
+              <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={10}>
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={22}
+                  color="#AFC3E6"
+                />
+              </Pressable>
+            </View>
+
+            <Pressable onPress={handleSubmit} disabled={loading} style={[styles.button, { backgroundColor: palette.accent }]}> 
+              <ThemedText style={styles.buttonText}>{loading ? "Logging in..." : "Log In"}</ThemedText>
+            </Pressable>
+
+            <Pressable onPress={() => router.push("/signup")}>
+              <ThemedText style={[styles.link, { color: palette.accent }]}>New user? Create account</ThemedText>
             </Pressable>
           </View>
-
-          <Pressable onPress={handleSubmit} disabled={loading} style={[styles.button, { backgroundColor: palette.accent }]}> 
-            <ThemedText style={styles.buttonText}>{loading ? "Logging in..." : "Log In"}</ThemedText>
-          </Pressable>
-
-          <Pressable onPress={() => router.push("/signup")}>
-            <ThemedText style={[styles.link, { color: palette.accent }]}>New user? Create account</ThemedText>
-          </Pressable>
-        </View>
-      </ThemedView>
-      </ScrollView>
-    </SafeAreaView>
+        </ThemedView>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+  },
+  bgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(4, 12, 28, 0.72)",
+  },
   safe: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   container: {
