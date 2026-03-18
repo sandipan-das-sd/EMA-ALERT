@@ -74,16 +74,61 @@ export function startAlertEngine({
   const failureCount = new Map();
   const permanentlyFailed = new Set();
   const historicalCache = new Map();
-  const sentAlerts = new Set();
+  const sentAlerts = new Map();
+
+  const SENT_ALERT_TTL_MS = (() => {
+    const v = parseInt(process.env.ALERT_SENT_TTL_MS, 10);
+    return Number.isFinite(v) && v > 0 ? v : 72 * 60 * 60 * 1000;
+  })();
+  const MAX_SENT_ALERTS = (() => {
+    const v = parseInt(process.env.ALERT_SENT_MAX, 10);
+    return Number.isFinite(v) && v > 0 ? v : 50_000;
+  })();
+  const MAX_CACHE_KEYS = (() => {
+    const v = parseInt(process.env.ALERT_CACHE_MAX_KEYS, 10);
+    return Number.isFinite(v) && v > 0 ? v : 5_000;
+  })();
+  let lastNoInstrumentsWarnAt = 0;
+  let lastCriticalWarnAt = 0;
+  let lastPruneAt = 0;
   
   // Track tick count for reduced logging
   let tickCount = 0;
   
   // Track last cleanup to prevent memory leak
   let lastCleanupDate = toIstDateString(Date.now());
+
+  const pruneMapToSize = (map, max) => {
+    if (map.size <= max) return;
+    const removeCount = map.size - max;
+    let removed = 0;
+    for (const key of map.keys()) {
+      map.delete(key);
+      removed += 1;
+      if (removed >= removeCount) break;
+    }
+  };
+
+  const pruneOldSentAlerts = (now = Date.now()) => {
+    for (const [id, ts] of sentAlerts.entries()) {
+      if (!Number.isFinite(ts) || now - ts > SENT_ALERT_TTL_MS) {
+        sentAlerts.delete(id);
+      }
+    }
+    pruneMapToSize(sentAlerts, MAX_SENT_ALERTS);
+  };
   
   // Cleanup function to prevent memory leak
   const cleanupDailyData = () => {
+    const now = Date.now();
+    if (now - lastPruneAt > 10 * 60 * 1000) {
+      pruneOldSentAlerts(now);
+      pruneMapToSize(workingKeyCache, MAX_CACHE_KEYS);
+      pruneMapToSize(failureCount, MAX_CACHE_KEYS);
+      pruneMapToSize(historicalCache, MAX_CACHE_KEYS);
+      lastPruneAt = now;
+    }
+
     const today = toIstDateString(Date.now());
     if (today && today !== lastCleanupDate) {
       console.log(`[AlertEngine] Daily cleanup: clearing ${sentAlerts.size} sent alerts`);
@@ -457,11 +502,12 @@ export function startAlertEngine({
       // FIXED: Check the correct variables
       if (candleClosed && isGreen && emaIntersectsCandle && closedAboveEma) {
         const alertId = `${instrumentKey}::${candleStartTs}`;
-        if (sentAlerts.has(alertId)) {
+        const alreadySentAt = sentAlerts.get(alertId);
+        if (alreadySentAt && Date.now() - alreadySentAt < SENT_ALERT_TTL_MS) {
           continue;
         }
         
-        sentAlerts.add(alertId);
+        sentAlerts.set(alertId, Date.now());
         const crossDetectedAt = Date.now(); // Track when we detected the cross
         const candleEndTime = candleEndTs;
         const delayFromCandleClose = Math.round((crossDetectedAt - candleEndTime) / 1000);
@@ -520,10 +566,14 @@ export function startAlertEngine({
       if (keysToProcess.length === 0) {
         if (shouldLog) {
           if (allKeys.length > 0) {
-            console.warn(
-              `[AlertEngine] ⚠️  All ${allKeys.length} instruments failed to load. Check Upstox token validity.`
-            );
-            console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://trade.gyanoda.in/login');
+            const now = Date.now();
+            if (now - lastNoInstrumentsWarnAt > 10 * 60 * 1000) {
+              console.warn(
+                `[AlertEngine] ⚠️  All ${allKeys.length} instruments failed to load. Check Upstox token validity.`
+              );
+              console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://trade.gyanoda.in/login');
+              lastNoInstrumentsWarnAt = now;
+            }
           } else {
             console.log('[AlertEngine] No user watchlists yet. Waiting for subscriptions...');
           }
@@ -642,12 +692,16 @@ export function startAlertEngine({
 
       // If ALL instruments failed, it's likely an Upstox auth issue
       if (successfulKeys.size === 0 && failedKeys.size > 0) {
-        console.warn(
-          `\n[AlertEngine] ⚠️  CRITICAL: ALL ${failedKeys.size} instruments failed to fetch!`
-        );
-        console.warn(`[AlertEngine] Likely cause: Invalid/expired Upstox API token (401 error)`);
-        console.warn(`[AlertEngine] Action: Please refresh your Upstox token at http://trade.gyanoda.in/login`);
-        console.warn(`[AlertEngine] Will retry with longer intervals to avoid spam.\n`);
+        const now = Date.now();
+        if (now - lastCriticalWarnAt > 10 * 60 * 1000) {
+          console.warn(
+            `\n[AlertEngine] ⚠️  CRITICAL: ALL ${failedKeys.size} instruments failed to fetch!`
+          );
+          console.warn(`[AlertEngine] Likely cause: Invalid/expired Upstox API token (401 error)`);
+          console.warn(`[AlertEngine] Action: Please refresh your Upstox token at http://trade.gyanoda.in/login`);
+          console.warn(`[AlertEngine] Will retry with longer intervals to avoid spam.\n`);
+          lastCriticalWarnAt = now;
+        }
       }
 
       if (failedKeys.size > 0 && process.env.DEBUG_ALERTS) {

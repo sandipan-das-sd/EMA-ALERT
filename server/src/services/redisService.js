@@ -5,6 +5,8 @@ class RedisService {
     this.client = null;
     this.connected = false;
     this.enabled = process.env.REDIS_ENABLED === 'true';
+    this.lastErrorLogAt = 0;
+    this.lastReconnectLogAt = 0;
   }
 
   async connect() {
@@ -19,15 +21,38 @@ class RedisService {
 
     try {
       const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-      this.client = createClient({ url: redisUrl });
+      const maxRetries = (() => {
+        const v = parseInt(process.env.REDIS_MAX_RETRIES, 10);
+        return Number.isFinite(v) && v >= 0 ? v : 6;
+      })();
+
+      this.client = createClient({
+        url: redisUrl,
+        socket: {
+          reconnectStrategy: (retries) => {
+            if (retries >= maxRetries) {
+              return new Error(`Redis reconnect limit reached (${maxRetries}). Falling back to in-memory.`);
+            }
+            return Math.min(200 * Math.pow(2, retries), 5000);
+          },
+        },
+      });
 
       this.client.on('error', (err) => {
-        console.error('[Redis] Connection error:', err.message);
+        const now = Date.now();
+        if (now - this.lastErrorLogAt > 60_000) {
+          console.error('[Redis] Connection error:', err.message);
+          this.lastErrorLogAt = now;
+        }
         this.connected = false;
       });
 
       this.client.on('reconnecting', () => {
-        console.log('[Redis] Reconnecting...');
+        const now = Date.now();
+        if (now - this.lastReconnectLogAt > 60_000) {
+          console.log('[Redis] Reconnecting...');
+          this.lastReconnectLogAt = now;
+        }
       });
 
       await this.client.connect();
