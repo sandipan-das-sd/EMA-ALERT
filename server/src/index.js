@@ -868,7 +868,20 @@ feed.on('error', (err) => {
             try { return await r.json(); } catch { return { data: {} }; }
           }));
           const merged = responses.reduce((acc, r) => ({ ...acc, ...(r?.data || {}) }), {});
-          return res.json({ data: merged, ts: Date.now() });
+          const normalized = {};
+          Object.entries(merged).forEach(([k, v]) => {
+            normalized[k] = v;
+            if (k.includes('|')) normalized[k.replace('|', ':')] = v;
+            if (k.includes(':')) normalized[k.replace(':', '|')] = v;
+          });
+
+          if (process.env.DEBUG_UPSTOX) {
+            console.log('[LTP Batch] Requested keys:', keys.slice(0, 10));
+            console.log('[LTP Batch] Returned keys:', Object.keys(merged).slice(0, 10));
+            console.log('[LTP Batch] Normalized keys:', Object.keys(normalized).slice(0, 10));
+          }
+
+          return res.json({ data: normalized, ts: Date.now() });
         }
 
         // If a plain symbol was passed, attempt to map via master

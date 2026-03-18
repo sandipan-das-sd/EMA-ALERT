@@ -8,6 +8,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useAlertContext } from '@/contexts/alert-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { APP_CONFIG } from '@/lib/config';
 import {
   getBatchLtp,
   getMarketSnapshot,
@@ -19,6 +20,12 @@ import {
 } from '@/lib/api';
 
 export default function HomeScreen() {
+  const DASHBOARD_DEBUG = true;
+  const logDashboard = (...args: any[]) => {
+    if (!DASHBOARD_DEBUG) return;
+    console.log('[Dashboard Debug]', ...args);
+  };
+
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
   const { state } = useAlertContext();
@@ -32,6 +39,10 @@ export default function HomeScreen() {
   const latest = state.alerts[0];
 
   const loadDashboardMarketData = useCallback(async () => {
+    logDashboard('Fetching market data', {
+      apiBase: APP_CONFIG.apiBase,
+      ts: new Date().toISOString(),
+    });
     setMarketError('');
 
     const [indicesResult, watchlistResult] = await Promise.allSettled([
@@ -40,24 +51,46 @@ export default function HomeScreen() {
     ]);
 
     const statusResult = await Promise.allSettled([getMarketStatus()]);
+    let finalIndicesCount = 0;
+    let finalWatchlistCount = 0;
+    let finalWatchlistWithPrice = 0;
+    let finalStatusOpen: boolean | null = null;
 
     const errorParts: string[] = [];
 
     if (indicesResult.status === 'fulfilled') {
       setIndices(indicesResult.value || []);
+      finalIndicesCount = (indicesResult.value || []).length;
+      logDashboard('Market snapshot success', {
+        totalIndices: (indicesResult.value || []).length,
+        withLtp: (indicesResult.value || []).filter((x) => typeof x.ltp === 'number').length,
+        sample: (indicesResult.value || []).slice(0, 3),
+      });
     } else {
       setIndices([]);
+      logDashboard('Market snapshot failed', indicesResult.reason);
       errorParts.push(indicesResult.reason instanceof Error ? indicesResult.reason.message : 'Failed to load market indices');
     }
 
     if (watchlistResult.status === 'fulfilled') {
       let wl = watchlistResult.value || [];
+      finalWatchlistCount = wl.length;
+      logDashboard('Watchlist API success', {
+        totalWatchlist: wl.length,
+        withPrice: wl.filter((w) => typeof w.price === 'number').length,
+        sample: wl.slice(0, 5).map((w) => ({ key: w.key, price: w.price, changePct: w.changePct })),
+      });
 
       // Fallback: fetch direct LTP if watchlist has items but no cached prices yet.
       const missingPriceKeys = wl.filter((w) => typeof w.price !== 'number').map((w) => w.key).filter(Boolean);
+      logDashboard('Watchlist missing-price keys', missingPriceKeys);
       if (missingPriceKeys.length > 0) {
         try {
           const ltpMap = await getBatchLtp(missingPriceKeys);
+          logDashboard('Batch LTP fallback success', {
+            returnedKeys: Object.keys(ltpMap || {}),
+            sample: Object.entries(ltpMap || {}).slice(0, 3),
+          });
           wl = wl.map((item) => {
             const quote = ltpMap[item.key];
             if (!quote || typeof quote.last_price !== 'number') return item;
@@ -71,23 +104,44 @@ export default function HomeScreen() {
             };
           });
         } catch {
+          logDashboard('Batch LTP fallback failed');
           // Keep base watchlist snapshot if direct LTP fallback fails.
         }
       }
 
+      logDashboard('Watchlist final mapped', {
+        totalWatchlist: wl.length,
+        withPrice: wl.filter((w) => typeof w.price === 'number').length,
+        sample: wl.slice(0, 5).map((w) => ({ key: w.key, price: w.price, changePct: w.changePct })),
+      });
+      finalWatchlistCount = wl.length;
+      finalWatchlistWithPrice = wl.filter((w) => typeof w.price === 'number').length;
       setWatchlist(wl);
     } else {
       setWatchlist([]);
+      logDashboard('Watchlist API failed', watchlistResult.reason);
       errorParts.push(watchlistResult.reason instanceof Error ? watchlistResult.reason.message : 'Failed to load watchlist prices');
     }
 
     if (statusResult[0].status === 'fulfilled') {
       setMarketStatus(statusResult[0].value);
+      finalStatusOpen = Boolean(statusResult[0].value?.isOpen);
+      logDashboard('Market status success', statusResult[0].value);
+    } else {
+      logDashboard('Market status failed', statusResult[0].reason);
     }
 
     if (errorParts.length) {
       setMarketError(errorParts.join(' | '));
     }
+
+    logDashboard('Fetch complete', {
+      errors: errorParts,
+      indexCards: finalIndicesCount,
+      watchlistItems: finalWatchlistCount,
+      watchlistWithPrice: finalWatchlistWithPrice,
+      statusOpen: finalStatusOpen,
+    });
 
     setMarketLoading(false);
   }, []);

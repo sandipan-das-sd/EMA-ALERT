@@ -25,6 +25,29 @@ const allowedSet = new Set(universe.map((u) => `${u.segment}|${u.symbol}`));
 
 router.use(protect);
 
+function buildKeyVariants(key, instrument) {
+  const variants = new Set([key]);
+  if (key.includes('|')) variants.add(key.replace('|', ':'));
+  if (key.includes(':')) variants.add(key.replace(':', '|'));
+
+  const segment = instrument?.segment || key.split(/[|:]/)[0];
+  const tradingSymbol = instrument?.tradingSymbol;
+  if (segment && tradingSymbol) {
+    variants.add(`${segment}|${tradingSymbol}`);
+    variants.add(`${segment}:${tradingSymbol}`);
+  }
+
+  return Array.from(variants);
+}
+
+function findQuoteByVariants(variants = []) {
+  for (const k of variants) {
+    const quote = marketState.latestQuotes[k] || marketState.lastTicks[k];
+    if (quote) return { key: k, quote };
+  }
+  return null;
+}
+
 // GET watchlist (with latest prices)
 router.get("/", async (req, res) => {
   try {
@@ -43,22 +66,18 @@ router.get("/", async (req, res) => {
     );
 
     const snapshot = items.map((key) => {
-      // Get price data
-      const price =
-        marketState.latestQuotes[key]?.ltp ||
-        marketState.lastTicks[key]?.ltp ||
-        null;
-      const changePct = marketState.latestQuotes[key]?.changePct || null;
-      const change = marketState.latestQuotes[key]?.change || null;
-      const ts =
-        marketState.latestQuotes[key]?.ts ||
-        marketState.lastTicks[key]?.ts ||
-        null;
-
-      console.log(`[Watchlist] ${key}: price=${price}, changePct=${changePct}`);
-
       // Get instrument details from search service
       const instrument = instrumentsSearchService.getInstrument(key);
+      const variants = buildKeyVariants(key, instrument);
+      const found = findQuoteByVariants(variants);
+      const matchedQuote = found?.quote || null;
+
+      const price = typeof matchedQuote?.ltp === 'number' ? matchedQuote.ltp : null;
+      const changePct = typeof matchedQuote?.changePct === 'number' ? matchedQuote.changePct : null;
+      const change = typeof matchedQuote?.change === 'number' ? matchedQuote.change : null;
+      const ts = matchedQuote?.ts || null;
+
+      console.log(`[Watchlist] ${key}: price=${price}, changePct=${changePct}, matchedKey=${found?.key || 'none'}`);
 
       return {
         key,
