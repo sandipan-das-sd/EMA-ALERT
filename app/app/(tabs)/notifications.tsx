@@ -1,5 +1,6 @@
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useMemo } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -11,11 +12,12 @@ export default function NotificationsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const { state, dispatch } = useAlertContext();
+  const insets = useSafeAreaInsets();
 
   const items = useMemo(() => state.alerts.slice(0, 100), [state.alerts]);
 
   return (
-    <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
+    <ThemedView style={[styles.container, { backgroundColor: palette.background, paddingTop: Math.max(insets.top, 10) }]}> 
       <View style={styles.headerRow}>
         <View>
           <ThemedText type="title" style={styles.title}>Alerts</ThemedText>
@@ -30,7 +32,7 @@ export default function NotificationsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.listWrap}>
+      <ScrollView contentContainerStyle={[styles.listWrap, { paddingBottom: insets.bottom + 90 }]}>
         {items.length === 0 ? (
           <ThemedView style={[styles.emptyCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 
             <ThemedText type="subtitle">No Alerts Yet</ThemedText>
@@ -76,7 +78,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  listWrap: { paddingBottom: 36, gap: 10 },
+  listWrap: { gap: 10 },
   alertCard: {
     borderWidth: 1,
     borderRadius: 16,

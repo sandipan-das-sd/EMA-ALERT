@@ -19,12 +19,16 @@ function isExpoGoClient() {
 /**
  * Hook to manage push notification setup and token registration
  */
-export function usePushNotifications() {
+export function usePushNotifications(enabled = true) {
   const notificationListener = useRef<NotificationSubscription | null>(null);
   const responseListener = useRef<NotificationSubscription | null>(null);
   const registeredRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     if (isExpoGoClient()) {
       console.log('[Push Hook] Expo Go detected. Skipping remote push setup.');
       return;
@@ -95,5 +99,5 @@ export function usePushNotifications() {
         responseListener.current.remove();
       }
     };
-  }, []);
+  }, [enabled]);
 }

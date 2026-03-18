@@ -1,9 +1,13 @@
-import { StyleSheet, Switch, View } from "react-native";
+import { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Constants from "expo-constants";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
+import { useAuthContext } from "@/contexts/auth-context";
 import { APP_CONFIG } from "@/lib/config";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -33,10 +37,40 @@ export default function SettingsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const { state, dispatch } = useAlertContext();
+  const { user, updateUpstoxToken, refreshMe, logout } = useAuthContext();
+  const insets = useSafeAreaInsets();
+
+  const [upstoxToken, setUpstoxToken] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const isExpoGo = Constants.executionEnvironment === "storeClient";
+
+  async function handleTokenUpdate() {
+    if (!upstoxToken.trim()) return;
+    setLoading(true);
+    setMessage("");
+    setError("");
+    try {
+      await updateUpstoxToken(upstoxToken.trim());
+      await refreshMe();
+      setUpstoxToken("");
+      setMessage("Upstox token updated successfully.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update token");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
+      <ScrollView
+        contentContainerStyle={{ paddingTop: Math.max(insets.top, 10), paddingBottom: insets.bottom + 90, gap: 14 }}
+        showsVerticalScrollIndicator={false}>
       <ThemedText type="title" style={styles.title}>Settings</ThemedText>
+      <ThemedText style={{ color: palette.muted }}>Signed in as {user?.email || "Unknown"}</ThemedText>
 
       <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
         <ToggleRow
@@ -74,19 +108,45 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+        <ThemedText type="defaultSemiBold">Upstox Token</ThemedText>
+        {message ? <ThemedText style={{ color: palette.success, fontWeight: "700" }}>{message}</ThemedText> : null}
+        {error ? <ThemedText style={{ color: palette.danger, fontWeight: "700" }}>{error}</ThemedText> : null}
+        <TextInput
+          value={upstoxToken}
+          onChangeText={setUpstoxToken}
+          autoCapitalize="none"
+          placeholder="Paste new Upstox access token"
+          placeholderTextColor={palette.muted}
+          style={[styles.input, { color: palette.text, borderColor: palette.border }]}
+        />
+        <Pressable
+          onPress={handleTokenUpdate}
+          disabled={loading || !upstoxToken.trim()}
+          style={[styles.primaryBtn, { backgroundColor: palette.accent }]}> 
+          <ThemedText style={styles.primaryBtnText}>{loading ? "Updating..." : "Update Token"}</ThemedText>
+        </Pressable>
+      </ThemedView>
+
+      <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
         <ThemedText type="defaultSemiBold">Connection</ThemedText>
         <ThemedText style={styles.rowText}>API: {APP_CONFIG.apiBase}</ThemedText>
         <ThemedText style={styles.rowText}>WS: {APP_CONFIG.wsUrl}</ThemedText>
         <ThemedText style={styles.rowText}>
           Stream: {state.stream.connected ? "Connected" : "Disconnected"}
         </ThemedText>
+        <ThemedText style={styles.rowText}>Push: {isExpoGo ? "Expo Go (disabled)" : "Enabled by permission"}</ThemedText>
       </ThemedView>
+
+      <Pressable onPress={logout} style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.card }]}> 
+        <ThemedText style={{ color: palette.text, fontWeight: "700" }}>Log Out</ThemedText>
+      </Pressable>
+      </ScrollView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, gap: 14 },
+  container: { flex: 1, paddingHorizontal: 16 },
   title: { fontSize: 28, lineHeight: 34 },
   card: {
     borderWidth: 1,
@@ -103,4 +163,27 @@ const styles = StyleSheet.create({
   toggleLeft: { flex: 1, gap: 2 },
   hintText: { opacity: 0.7, fontSize: 12, lineHeight: 18 },
   rowText: { opacity: 0.75, fontSize: 13, lineHeight: 18 },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  primaryBtn: {
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  primaryBtnText: {
+    color: "#0B1220",
+    fontWeight: "700",
+  },
+  secondaryBtn: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: -2,
+  },
 });

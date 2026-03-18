@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -10,11 +11,15 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
   const { state } = useAlertContext();
+  const insets = useSafeAreaInsets();
 
   const latest = state.alerts[0];
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
+      <ScrollView
+        contentContainerStyle={{ paddingTop: Math.max(insets.top, 10), paddingBottom: insets.bottom + 90 }}
+        showsVerticalScrollIndicator={false}>
       <ThemedView style={[styles.hero, { backgroundColor: palette.card, borderColor: palette.border }]}> 
         <ThemedText type="title" style={styles.heroTitle}>EMA Alert Control</ThemedText>
         <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
@@ -64,6 +69,7 @@ export default function HomeScreen() {
           <ThemedText style={styles.statusText}>No signal received yet.</ThemedText>
         )}
       </ThemedView>
+      </ScrollView>
     </ThemedView>
   );
 }
@@ -71,7 +77,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
     gap: 12,
   },
   hero: {

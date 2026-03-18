@@ -26,13 +26,18 @@ function toAlertPayload(input: any): EmaAlert | null {
   };
 }
 
-export function useAlertStream() {
+export function useAlertStream(enabled = true) {
   const { state, dispatch } = useAlertContext();
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
 
   useEffect(() => {
+    if (!enabled) {
+      dispatch({ type: "STREAM_DISCONNECTED", error: null });
+      return;
+    }
+
     let alive = true;
 
     const connect = () => {
@@ -97,5 +102,5 @@ export function useAlertStream() {
         socketRef.current = null;
       }
     };
-  }, [dispatch, state.preferences]);
+  }, [enabled, dispatch, state.preferences]);
 }

@@ -1,4 +1,5 @@
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -19,9 +20,13 @@ export default function WatchlistScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
   const { state } = useAlertContext();
+  const insets = useSafeAreaInsets();
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
+      <ScrollView
+        contentContainerStyle={{ paddingTop: Math.max(insets.top, 10), paddingBottom: insets.bottom + 90 }}
+        showsVerticalScrollIndicator={false}>
       <ThemedText type="title" style={styles.title}>Watchlist</ThemedText>
       <ThemedText style={{ color: palette.muted }}>
         Quick monitor for priority instruments and their latest EMA-cross activity.
@@ -49,6 +54,7 @@ export default function WatchlistScreen() {
           );
         })}
       </View>
+      </ScrollView>
     </ThemedView>
   );
 }
@@ -57,7 +63,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 18,
   },
   title: {
     fontSize: 28,

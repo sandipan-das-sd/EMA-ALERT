@@ -1,9 +1,11 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, router, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { AlertProvider } from '@/contexts/alert-context';
+import { AuthProvider, useAuthContext } from '@/contexts/auth-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAlertStream } from '@/hooks/use-alert-stream';
@@ -14,12 +16,41 @@ export const unstable_settings = {
 };
 
 function AppShell() {
-  useAlertStream();
-  usePushNotifications();
+  const { user, ready } = useAuthContext();
+  const segments = useSegments();
+
+  const inAuthRoute = segments[0] === 'login' || segments[0] === 'signup';
+  const inTokenRoute = segments[0] === 'upstox-token';
+  const hasUpstoxToken = !!user?.hasUpstoxToken;
+  const shouldEnableRealtime = !!user?.id;
+
+  useAlertStream(shouldEnableRealtime);
+  usePushNotifications(shouldEnableRealtime);
+
+  useEffect(() => {
+    if (!ready) return;
+
+    if (!user && !inAuthRoute) {
+      router.replace('/login');
+      return;
+    }
+
+    if (user && !hasUpstoxToken && !inTokenRoute) {
+      router.replace('/upstox-token');
+      return;
+    }
+
+    if (user && hasUpstoxToken && (inAuthRoute || inTokenRoute)) {
+      router.replace('/(tabs)');
+    }
+  }, [ready, user, hasUpstoxToken, inAuthRoute, inTokenRoute]);
 
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="signup" options={{ headerShown: false }} />
+      <Stack.Screen name="upstox-token" options={{ headerShown: false }} />
       <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Alert Details' }} />
     </Stack>
   );
@@ -55,9 +86,11 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={navTheme}>
-      <AlertProvider>
-        <AppShell />
-      </AlertProvider>
+      <AuthProvider>
+        <AlertProvider>
+          <AppShell />
+        </AlertProvider>
+      </AuthProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );
