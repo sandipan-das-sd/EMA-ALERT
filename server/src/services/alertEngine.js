@@ -1,6 +1,7 @@
 import fetch from "node-fetch";
 import Alert from "../models/Alert.js";
 import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
+import { enqueueBufferedVoiceAlert } from "./voiceNotification.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -708,6 +709,19 @@ export function startAlertEngine({
                         const whatsappDuration = Date.now() - whatsappStartTime;
                         console.error(`[AlertEngine] ✗ WhatsApp error for ${instrumentName} (${whatsappDuration}ms):`, err.message);
                       });
+                    }
+
+                    // Queue voice call in buffered/cooldown mode (non-blocking)
+                    const voiceResult = enqueueBufferedVoiceAlert({
+                      instrumentKey,
+                      instrumentName,
+                      close: sig.close,
+                      ema: sig.ema,
+                      ts: sig.ts,
+                      strategy: 'ema20_cross_up',
+                    });
+                    if (process.env.DEBUG_ALERTS && voiceResult?.reason) {
+                      console.log(`[AlertEngine] Voice queue skipped for ${instrumentName}: ${voiceResult.reason}`);
                     }
                   } catch (e) {
                     console.warn(`[AlertEngine] Broadcast failed:`, e?.message);

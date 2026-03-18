@@ -5,25 +5,40 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const navyLight = '#0E1E3A';
+const navyDark = '#0A1329';
+const gold = '#D4A63A';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: '#0E1E3A',
+    background: '#F4F7FD',
+    tint: navyLight,
+    icon: '#57719D',
+    tabIconDefault: '#57719D',
+    tabIconSelected: gold,
+    card: '#FFFFFF',
+    border: '#D8E3F5',
+    accent: gold,
+    muted: '#6C7FA3',
+    success: '#0E9F6E',
+    warning: '#C7821A',
+    danger: '#C73E4A',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: '#EDF2FF',
+    background: navyDark,
+    tint: '#9DB6E6',
+    icon: '#8BA3CF',
+    tabIconDefault: '#8BA3CF',
+    tabIconSelected: gold,
+    card: '#0F1D36',
+    border: '#1D3258',
+    accent: gold,
+    muted: '#B6C8EA',
+    success: '#2EC38A',
+    warning: '#E7B24B',
+    danger: '#F0717A',
   },
 };
 
@@ -39,15 +54,15 @@ export const Fonts = Platform.select({
     mono: 'ui-monospace',
   },
   default: {
-    sans: 'normal',
+    sans: 'sans-serif',
     serif: 'serif',
-    rounded: 'normal',
+    rounded: 'sans-serif-medium',
     mono: 'monospace',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+    sans: "'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif",
     serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
+    rounded: "'Avenir Next', 'Trebuchet MS', sans-serif",
     mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
 });
