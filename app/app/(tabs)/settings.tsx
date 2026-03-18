@@ -63,6 +63,14 @@ export default function SettingsScreen() {
             dispatch({ type: "SET_PREFERENCES", payload: { inAppSoundEnabled: value } })
           }
         />
+        <ToggleRow
+          label="Push Notifications"
+          hint="Receive real-time alerts via Expo push"
+          value={state.preferences.pushNotificationsEnabled}
+          onValueChange={(value) =>
+            dispatch({ type: "SET_PREFERENCES", payload: { pushNotificationsEnabled: value } })
+          }
+        />
       </ThemedView>
 
       <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 

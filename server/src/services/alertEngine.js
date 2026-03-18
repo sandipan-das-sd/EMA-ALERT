@@ -2,6 +2,7 @@ import fetch from "node-fetch";
 import Alert from "../models/Alert.js";
 import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
 import { enqueueBufferedVoiceAlert } from "./voiceNotification.js";
+import { sendPushAlertToUser } from "./pushNotification.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -517,8 +518,18 @@ export function startAlertEngine({
       }
 
       if (keysToProcess.length === 0) {
-        if (shouldLog) console.log('[AlertEngine] No instruments to monitor');
-        return setTimeout(tick, intervalMs);
+        if (shouldLog) {
+          if (allKeys.length > 0) {
+            console.warn(
+              `[AlertEngine] ⚠️  All ${allKeys.length} instruments failed to load. Check Upstox token validity.`
+            );
+            console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://trade.gyanoda.in/login');
+          } else {
+            console.log('[AlertEngine] No user watchlists yet. Waiting for subscriptions...');
+          }
+        }
+        // Longer interval when no instruments available to reduce log spam
+        return setTimeout(tick, Math.max(intervalMs, 30_000));
       }
 
       const keyToSignal = new Map();
@@ -629,6 +640,16 @@ export function startAlertEngine({
       console.log(`  ✓ Success: ${successfulKeys.size}/${keysToProcess.length}`);
       console.log(`  ✗ Failed: ${failedKeys.size}/${keysToProcess.length}`);
 
+      // If ALL instruments failed, it's likely an Upstox auth issue
+      if (successfulKeys.size === 0 && failedKeys.size > 0) {
+        console.warn(
+          `\n[AlertEngine] ⚠️  CRITICAL: ALL ${failedKeys.size} instruments failed to fetch!`
+        );
+        console.warn(`[AlertEngine] Likely cause: Invalid/expired Upstox API token (401 error)`);
+        console.warn(`[AlertEngine] Action: Please refresh your Upstox token at http://trade.gyanoda.in/login`);
+        console.warn(`[AlertEngine] Will retry with longer intervals to avoid spam.\n`);
+      }
+
       if (failedKeys.size > 0 && process.env.DEBUG_ALERTS) {
         console.log(`\n[AlertEngine] Failed instruments:`);
         for (const [key, reason] of failedKeys) {
@@ -712,6 +733,16 @@ export function startAlertEngine({
                     }
 
                     // Queue voice call in buffered/cooldown mode (non-blocking)
+                    // Fetch user's phone for per-user voice routing
+                    let userPhone = '';
+                    try {
+                      const User = (await import('../models/User.js')).default;
+                      const user = await User.findById(userId).select('phone');
+                      userPhone = user?.phone || '';
+                    } catch (err) {
+                      console.warn(`[AlertEngine] Could not fetch user phone for ${userId}:`, err.message);
+                    }
+
                     const voiceResult = enqueueBufferedVoiceAlert({
                       instrumentKey,
                       instrumentName,
@@ -719,9 +750,40 @@ export function startAlertEngine({
                       ema: sig.ema,
                       ts: sig.ts,
                       strategy: 'ema20_cross_up',
+                      phoneNumber: userPhone,
                     });
                     if (process.env.DEBUG_ALERTS && voiceResult?.reason) {
                       console.log(`[AlertEngine] Voice queue skipped for ${instrumentName}: ${voiceResult.reason}`);
+                    }
+
+                    // Send push notification (non-blocking, with fallback)
+                    const pushStartTime = Date.now();
+                    try {
+                      const User = (await import('../models/User.js')).default;
+                      const userForPush = await User.findById(userId).select('pushToken');
+                      if (userForPush?.pushToken) {
+                        const pushResult = await sendPushAlertToUser(userForPush, {
+                          instrumentKey,
+                          instrumentName,
+                          close: sig.close,
+                          ema: sig.ema,
+                          strategy: 'ema20_cross_up',
+                        }, { pushNotificationsEnabled: true });
+                        
+                        const pushDuration = Date.now() - pushStartTime;
+                        if (pushResult.success) {
+                          console.log(`[AlertEngine] ✓ Push sent for ${instrumentName} (${pushDuration}ms)`);
+                        } else if (pushResult.sent === false) {
+                          if (process.env.DEBUG_ALERTS) {
+                            console.log(`[AlertEngine] Push skipped for ${instrumentName}: ${pushResult.reason} (${pushDuration}ms)`);
+                          }
+                        } else {
+                          console.warn(`[AlertEngine] ✗ Push failed for ${instrumentName}:`, pushResult.error);
+                        }
+                      }
+                    } catch (err) {
+                      const pushDuration = Date.now() - pushStartTime;
+                      console.warn(`[AlertEngine] Push notification error for ${instrumentName} (${pushDuration}ms):`, err?.message);
                     }
                   } catch (e) {
                     console.warn(`[AlertEngine] Broadcast failed:`, e?.message);

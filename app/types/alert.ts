@@ -27,6 +27,7 @@ export interface AlertPreferences {
   vibrationEnabled: boolean;
   hapticsEnabled: boolean;
   inAppSoundEnabled: boolean;
+  pushNotificationsEnabled: boolean;
 }
 
 export interface AlertState {

@@ -31,6 +31,18 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Phone number for Exotel voice alerts (e.g., +919876543210)
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    // Expo push token for real-time notifications
+    pushToken: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     notes: [{
       title: {
         type: String,

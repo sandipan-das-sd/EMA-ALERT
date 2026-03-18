@@ -17,6 +17,7 @@ const initialState: AlertState = {
     vibrationEnabled: true,
     hapticsEnabled: true,
     inAppSoundEnabled: false,
+    pushNotificationsEnabled: true,
   },
 };
 

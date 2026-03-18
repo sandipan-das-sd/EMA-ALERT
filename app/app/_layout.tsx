@@ -7,6 +7,7 @@ import { AlertProvider } from '@/contexts/alert-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAlertStream } from '@/hooks/use-alert-stream';
+import { usePushNotifications } from '@/hooks/use-push-notifications';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -14,6 +15,7 @@ export const unstable_settings = {
 
 function AppShell() {
   useAlertStream();
+  usePushNotifications();
 
   return (
     <Stack>

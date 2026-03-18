@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getRedisService } from "./redisService.js";
 
 const BUFFER_WINDOW_MS = 5_000;
 const COOLDOWN_MS = 5 * 60 * 1000;
@@ -35,18 +36,32 @@ function normalizePhoneNumber(input) {
   return `+${trimmed}`;
 }
 
+/**
+ * Extract strike price (first number) from instrument name
+ * "23700 CE NIFTY 01082024" → "23700"
+ * "RELIANCE" → "RELIANCE"
+ */
+function extractStrikePrice(instrumentName) {
+  if (!instrumentName) return "Unknown";
+  const match = String(instrumentName).match(/^\d+/);
+  return match ? match[0] : instrumentName;
+}
+
 function toLine(signal) {
   const instrument = signal.instrumentName || signal.instrumentKey || "Unknown";
+  const strikePrice = extractStrikePrice(instrument);
   const close = Number.isFinite(signal.close) ? signal.close.toFixed(2) : "NA";
   const ema = Number.isFinite(signal.ema) ? signal.ema.toFixed(2) : "NA";
-  return `${instrument} crossed EMA. Close ${close}, EMA ${ema}.`;
+  return `Alert: ${strikePrice} EMA crossover. Close ${close}, EMA ${ema}.`;
 }
 
 function buildCombinedMessage(signals) {
-  if (!signals.length) return "EMA crossover alert.";
+  if (!signals.length) return "Alert: EMA crossover detected.";
 
   const lines = signals.map((s) => toLine(s));
-  let message = `EMA alert for ${signals.length} signal${signals.length > 1 ? "s" : ""}. ${lines.join(" ")}`;
+  let message = signals.length === 1 
+    ? lines[0]
+    : `${signals.length} alerts: ${lines.join(" ")}`;
 
   if (message.length > MAX_MESSAGE_LENGTH) {
     message = `${message.slice(0, MAX_MESSAGE_LENGTH - 3)}...`;
@@ -115,7 +130,7 @@ export async function triggerCall(message, phoneNumber) {
   }
 }
 
-export function enqueueBufferedVoiceAlert({
+export async function enqueueBufferedVoiceAlert({
   instrumentKey,
   instrumentName,
   close,
@@ -125,14 +140,38 @@ export function enqueueBufferedVoiceAlert({
   phoneNumber,
 }) {
   const now = Date.now();
-  cleanupSeenSignals(now);
-
+  const redis = getRedisService();
   const signalKey = `${instrumentKey || "unknown"}::${ts || now}::${strategy}`;
-  if (seenSignals.has(signalKey)) {
+
+  // Try Redis first, fallback to memory
+  let isDuplicate = false;
+  if (redis.isConnected()) {
+    try {
+      isDuplicate = await redis.exists(`voice:dedupe:${signalKey}`);
+      if (!isDuplicate) {
+        const dedupeSeconds = Math.ceil(DEDUPE_TTL_MS / 1000);
+        await redis.setWithTTL(`voice:dedupe:${signalKey}`, '1', dedupeSeconds);
+      }
+    } catch (err) {
+      console.warn('[Voice] Redis dedupe failed, falling back to memory:', err.message);
+      isDuplicate = seenSignals.has(signalKey);
+      if (!isDuplicate) {
+        seenSignals.set(signalKey, now);
+      }
+    }
+  } else {
+    // Fallback to memory
+    cleanupSeenSignals(now);
+    isDuplicate = seenSignals.has(signalKey);
+    if (!isDuplicate) {
+      seenSignals.set(signalKey, now);
+    }
+  }
+
+  if (isDuplicate) {
     return { enqueued: false, reason: "duplicate_signal" };
   }
 
-  seenSignals.set(signalKey, now);
   pendingSignals.set(signalKey, {
     instrumentKey,
     instrumentName,
@@ -151,12 +190,41 @@ export async function flushBufferedCalls() {
   if (!pendingSignals.size) return { sent: false, reason: "empty_buffer" };
 
   const now = Date.now();
-  const elapsedSinceLastCall = now - lastCallAt;
+  const redis = getRedisService();
+  const COOLDOWN_KEY = 'voice:cooldown:global';
 
-  if (lastCallAt && elapsedSinceLastCall < COOLDOWN_MS) {
-    const remaining = COOLDOWN_MS - elapsedSinceLastCall;
-    scheduleFlush(Math.max(remaining, 500));
-    return { sent: false, reason: "cooldown", remainingMs: remaining };
+  let canCall = true;
+  let remainingMs = 0;
+
+  // Check cooldown via Redis first, fallback to memory
+  if (redis.isConnected()) {
+    try {
+      const cooldownValue = await redis.get(COOLDOWN_KEY);
+      if (cooldownValue) {
+        const ttl = await redis.getTTL(COOLDOWN_KEY);
+        canCall = false;
+        remainingMs = ttl * 1000;
+      }
+    } catch (err) {
+      console.warn('[Voice] Redis cooldown check failed, falling back to memory:', err.message);
+      const elapsedSinceLastCall = now - lastCallAt;
+      if (lastCallAt && elapsedSinceLastCall < COOLDOWN_MS) {
+        canCall = false;
+        remainingMs = COOLDOWN_MS - elapsedSinceLastCall;
+      }
+    }
+  } else {
+    // Fallback to memory
+    const elapsedSinceLastCall = now - lastCallAt;
+    if (lastCallAt && elapsedSinceLastCall < COOLDOWN_MS) {
+      canCall = false;
+      remainingMs = COOLDOWN_MS - elapsedSinceLastCall;
+    }
+  }
+
+  if (!canCall) {
+    scheduleFlush(Math.max(remainingMs, 500));
+    return { sent: false, reason: "cooldown", remainingMs };
   }
 
   const allSignals = Array.from(pendingSignals.values());
@@ -170,6 +238,16 @@ export async function flushBufferedCalls() {
 
   if (result.success) {
     lastCallAt = Date.now();
+
+    // Set cooldown in Redis
+    if (redis.isConnected()) {
+      try {
+        const cooldownSeconds = Math.ceil(COOLDOWN_MS / 1000);
+        await redis.setWithTTL(COOLDOWN_KEY, '1', cooldownSeconds);
+      } catch (err) {
+        console.warn('[Voice] Redis cooldown set failed:', err.message);
+      }
+    }
   }
 
   return {

@@ -17,6 +17,7 @@ import { startUpstoxPoller } from './services/upstoxPoller.js';
 import { instrumentsSearchService } from './services/instrumentsSearch.js';
 import { dynamicSubscriptionManager } from './services/dynamicSubscription.js';
 import { startAlertEngine } from './services/alertEngine.js';
+import { getRedisService } from './services/redisService.js';
 import fetch from 'node-fetch';
 import { WebSocketServer } from 'ws';
 import fs from 'fs';
@@ -125,6 +126,15 @@ async function start() {
       family: 4, // Force IPv4 to reduce DNS resolution complexity
     });
     console.log('MongoDB connected');
+
+    // Initialize Redis for distributed caching (optional, with fallback)
+    const redis = getRedisService();
+    const redisConnected = await redis.connect();
+    if (redisConnected) {
+      console.log('[Redis] ✓ Connected for voice dedupe/cooldown caching');
+    } else {
+      console.log('[Redis] Disabled or unreachable; falling back to in-memory cache');
+    }
     
     // Initialize instruments search service
     console.log('Initializing instruments search service...');

@@ -24,15 +24,15 @@ function setTokenCookie(res, userId) {
 
 router.post('/signup', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email & password required' });
     }
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ message: 'Email already in use' });
-    const user = await User.create({ name, email, password });
+    const user = await User.create({ name, email, password, phone: phone || '' });
   setTokenCookie(res, user._id.toString());
-  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: false } });
+  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone, watchlist: user.watchlist || [], hasUpstoxToken: false } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -70,7 +70,7 @@ router.post('/login', async (req, res) => {
     }
     
   setTokenCookie(res, user._id.toString());
-  res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
+  res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -124,6 +124,72 @@ router.put('/upstox-token', async (req, res) => {
   }
 });
 
+router.put('/phone', async (req, res) => {
+  try {
+    const token = req.cookies[process.env.COOKIE_NAME];
+    if (!token) return res.status(401).json({ message: 'Not authenticated' });
+    
+    const { verifyToken } = await import('../utils/jwt.js');
+    const decoded = verifyToken(token);
+    if (!decoded) return res.status(401).json({ message: 'Invalid token' });
+    
+    const { phone } = req.body;
+    if (!phone || !String(phone).trim()) {
+      return res.status(400).json({ message: 'Phone number required' });
+    }
+    
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const oldPhone = user.phone;
+    user.phone = String(phone).trim();
+    await user.save();
+    
+    console.log(`[Phone Update] User ${user.email} updated phone (old: ${oldPhone || 'empty'}, new: ${user.phone})`);
+    
+    res.json({ 
+      message: 'Phone number updated successfully',
+      phone: user.phone
+    });
+  } catch (e) {
+    console.error('[Phone Update] Error:', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/push-token', async (req, res) => {
+  try {
+    const token = req.cookies[process.env.COOKIE_NAME];
+    if (!token) return res.status(401).json({ message: 'Not authenticated' });
+    
+    const { verifyToken } = await import('../utils/jwt.js');
+    const decoded = verifyToken(token);
+    if (!decoded) return res.status(401).json({ message: 'Invalid token' });
+    
+    const { pushToken } = req.body;
+    if (!pushToken || !String(pushToken).trim()) {
+      return res.status(400).json({ message: 'Push token required' });
+    }
+    
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    const oldToken = user.pushToken ? user.pushToken.substring(0, 20) + '...' : 'none';
+    user.pushToken = String(pushToken).trim();
+    await user.save();
+    
+    console.log(`[Push Token] User ${user.email} registered push token (old: ${oldToken}, new: ${user.pushToken.substring(0, 20)}...)`);
+    
+    res.json({ 
+      message: 'Push token registered successfully',
+      pushToken: user.pushToken.substring(0, 20) + '...'
+    });
+  } catch (e) {
+    console.error('[Push Token] Error:', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 router.get('/me', async (req, res) => {
   const token = req.cookies[process.env.COOKIE_NAME];
   if (!token) return res.status(200).json({ user: null });
@@ -133,7 +199,7 @@ router.get('/me', async (req, res) => {
     if (!decoded) return res.status(200).json({ user: null });
       User.findById(decoded.id).select('+upstoxAccessToken').then((user) => {
         if (!user) return res.status(200).json({ user: null });
-        res.json({ user: { id: user._id, name: user.name, email: user.email, watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
+        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
     });
   });
 });
