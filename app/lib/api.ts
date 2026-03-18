@@ -9,6 +9,27 @@ export interface AppUser {
   hasUpstoxToken?: boolean;
 }
 
+export interface WatchlistItem {
+  key: string;
+  name?: string;
+  tradingSymbol?: string;
+  segment?: string;
+  expiry?: string | null;
+  price?: number | null;
+  changePct?: number | null;
+  change?: number | null;
+  ts?: string | null;
+}
+
+export interface InstrumentSearchItem {
+  key: string;
+  tradingSymbol: string;
+  name?: string;
+  segment?: string;
+  lotSize?: number;
+  tickSize?: number;
+}
+
 async function request(path: string, options: { method?: string; body?: unknown } = {}) {
   let response: Response;
   try {
@@ -71,4 +92,35 @@ export async function updateUpstoxToken(upstoxAccessToken: string) {
     method: "PUT",
     body: { upstoxAccessToken },
   });
+}
+
+export async function getWatchlist() {
+  const data = await request("/watchlist");
+  return (data?.watchlist || []) as WatchlistItem[];
+}
+
+export async function addToWatchlist(instrumentKey: string) {
+  const data = await request("/watchlist", {
+    method: "POST",
+    body: { instrumentKey },
+  });
+  return (data?.watchlist || []) as string[];
+}
+
+export async function removeFromWatchlist(instrumentKey: string) {
+  const data = await request(`/watchlist/${encodeURIComponent(instrumentKey)}`, {
+    method: "DELETE",
+  });
+  return (data?.watchlist || []) as string[];
+}
+
+export async function searchInstruments(query: string, options: { segments?: string[]; limit?: number } = {}) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.segments?.length) {
+    params.set("segments", options.segments.join(","));
+  }
+  const data = await request(`/instruments/search?${params.toString()}`);
+  return (data?.results || []) as InstrumentSearchItem[];
 }
