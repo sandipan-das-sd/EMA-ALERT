@@ -28,6 +28,35 @@ export interface InstrumentSearchItem {
   segment?: string;
   lotSize?: number;
   tickSize?: number;
+  expiry?: string | number | null;
+  strike?: number | null;
+  optionType?: string | null;
+}
+
+export interface OptionFilterMeta {
+  underlying: string;
+  segment: string;
+  matchCount: number;
+  years: number[];
+  monthsByYear: Record<string, number[]>;
+  daysByYearMonth: Record<string, number[]>;
+}
+
+export interface OptionUnderlyingMeta {
+  segment: string;
+  underlyings: string[];
+}
+
+export interface OptionSearchFilters {
+  query?: string;
+  segments?: string[];
+  limit?: number;
+  underlying?: string;
+  expiryYear?: number;
+  expiryMonth?: number;
+  expiryDay?: number;
+  optionType?: 'ALL' | 'CE' | 'PE';
+  debug?: boolean;
 }
 
 async function request(path: string, options: { method?: string; body?: unknown } = {}) {
@@ -123,4 +152,43 @@ export async function searchInstruments(query: string, options: { segments?: str
   }
   const data = await request(`/instruments/search?${params.toString()}`);
   return (data?.results || []) as InstrumentSearchItem[];
+}
+
+export async function searchOptionContracts(filters: OptionSearchFilters = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.query) params.set('q', filters.query);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.segments?.length) params.set('segments', filters.segments.join(','));
+  if (filters.underlying) params.set('underlying', filters.underlying);
+  if (filters.expiryYear) params.set('expiryYear', String(filters.expiryYear));
+  if (filters.expiryMonth) params.set('expiryMonth', String(filters.expiryMonth));
+  if (filters.expiryDay) params.set('expiryDay', String(filters.expiryDay));
+  if (filters.optionType && filters.optionType !== 'ALL') params.set('optionType', filters.optionType);
+  if (filters.debug) params.set('debug', '1');
+
+  const data = await request(`/instruments/search?${params.toString()}`);
+  return (data?.results || []) as InstrumentSearchItem[];
+}
+
+export async function getOptionFilterMeta(
+  underlying: string,
+  options: { segment?: string; debug?: boolean } = {}
+) {
+  const params = new URLSearchParams();
+  params.set('underlying', underlying);
+  params.set('segment', options.segment || 'NSE_FO');
+  if (options.debug) params.set('debug', '1');
+
+  const data = await request(`/instruments/options/meta?${params.toString()}`);
+  return data as OptionFilterMeta;
+}
+
+export async function getOptionUnderlyings(options: { segment?: string; debug?: boolean } = {}) {
+  const params = new URLSearchParams();
+  params.set('segment', options.segment || 'NSE_FO');
+  if (options.debug) params.set('debug', '1');
+
+  const data = await request(`/instruments/options/underlyings?${params.toString()}`);
+  return data as OptionUnderlyingMeta;
 }
