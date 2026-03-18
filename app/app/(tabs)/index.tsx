@@ -23,19 +23,34 @@ export default function HomeScreen() {
   const latest = state.alerts[0];
 
   const loadDashboardMarketData = useCallback(async () => {
-    try {
-      setMarketError('');
-      const [nextIndices, nextWatchlist] = await Promise.all([
-        getMarketSnapshot(),
-        getWatchlist(),
-      ]);
-      setIndices(nextIndices || []);
-      setWatchlist(nextWatchlist || []);
-    } catch (e) {
-      setMarketError(e instanceof Error ? e.message : 'Failed to load market data');
-    } finally {
-      setMarketLoading(false);
+    setMarketError('');
+
+    const [indicesResult, watchlistResult] = await Promise.allSettled([
+      getMarketSnapshot(),
+      getWatchlist(),
+    ]);
+
+    const errorParts: string[] = [];
+
+    if (indicesResult.status === 'fulfilled') {
+      setIndices(indicesResult.value || []);
+    } else {
+      setIndices([]);
+      errorParts.push(indicesResult.reason instanceof Error ? indicesResult.reason.message : 'Failed to load market indices');
     }
+
+    if (watchlistResult.status === 'fulfilled') {
+      setWatchlist(watchlistResult.value || []);
+    } else {
+      setWatchlist([]);
+      errorParts.push(watchlistResult.reason instanceof Error ? watchlistResult.reason.message : 'Failed to load watchlist prices');
+    }
+
+    if (errorParts.length) {
+      setMarketError(errorParts.join(' | '));
+    }
+
+    setMarketLoading(false);
   }, []);
 
   useEffect(() => {
@@ -50,7 +65,21 @@ export default function HomeScreen() {
     }, [loadDashboardMarketData])
   );
 
-  const topIndices = indices.filter((x) => x.key === 'NSE_INDEX|Nifty 50' || x.key === 'NSE_INDEX|Nifty Bank');
+  const topIndices = (() => {
+    const keyNorm = (k?: string | null) => String(k || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const n50 = indices.find((x) => {
+      const k = keyNorm(x.key);
+      return k.includes('nifty 50') || k.endsWith('|nifty50') || k.includes('nifty50');
+    });
+    const nb = indices.find((x) => {
+      const k = keyNorm(x.key);
+      return k.includes('nifty bank') || k.includes('banknifty') || k.endsWith('|nifty bank');
+    });
+
+    const preferred = [n50, nb].filter(Boolean) as MarketIndexItem[];
+    if (preferred.length > 0) return preferred;
+    return indices.slice(0, 2);
+  })();
   const watchlistWithPrice = watchlist.filter((item) => typeof item.price === 'number').slice(0, 8);
 
   return (

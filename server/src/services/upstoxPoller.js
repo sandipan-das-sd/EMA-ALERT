@@ -15,6 +15,8 @@ export function startUpstoxPoller({
   let stopped = false;
   let pollCount = 0; // Track poll iterations
   const failedInstruments = new Set(); // Track permanently failed instruments
+  let authBlockedUntil = 0;
+  let lastAuthWarnAt = 0;
 
   function chunk(arr, size) {
     const out = [];
@@ -26,6 +28,18 @@ export function startUpstoxPoller({
     if (stopped) return;
     pollCount++;
     const shouldLog = pollCount % 10 === 1; // Only log every 10th poll to reduce spam
+
+    const nowMs = Date.now();
+    if (authBlockedUntil > nowMs) {
+      if (shouldLog) {
+        const waitSec = Math.ceil((authBlockedUntil - nowMs) / 1000);
+        console.log(`[Upstox Poller] Paused due to invalid token. Next poll in ${waitSec}s`);
+      }
+      if (!stopped) {
+        setTimeout(tick, Math.max(1000, authBlockedUntil - nowMs));
+      }
+      return;
+    }
     
     try {
       // Upstox LTP endpoint likely has subscription limits per request; fetch in batches
@@ -52,6 +66,14 @@ export function startUpstoxPoller({
           )}`;
           const res = await fetch(url, { headers });
           if (!res.ok) {
+            if (res.status === 401) {
+              authBlockedUntil = Date.now() + 60_000;
+              const now = Date.now();
+              if (now - lastAuthWarnAt > 60_000) {
+                console.warn('[Upstox Poller] Invalid/expired token (401). Poller paused for 60s.');
+                lastAuthWarnAt = now;
+              }
+            }
             return { data: {} };
           }
           try {

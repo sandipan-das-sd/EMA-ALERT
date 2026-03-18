@@ -65,6 +65,8 @@ export function createUpstoxFeed({
   let closed = false;
   let proto;
   let ready = false;
+  let retryAttempt = 0;
+  let lastAuthWarnAt = 0;
 
   const getToken = getAccessToken || (() => accessToken);
 
@@ -206,6 +208,7 @@ export function createUpstoxFeed({
       ws = new WebSocket(wssUrl);
 
       ws.on("open", () => {
+        retryAttempt = 0;
         console.log('[Upstox Feed] ✓ WebSocket connected successfully');
         const guid = uuidv4().replace(/-/g, "").slice(0, 20);
         const { transformed: transformedKeys, reverseMapping } =
@@ -351,15 +354,31 @@ export function createUpstoxFeed({
         console.log(`[Upstox Feed] WebSocket closed: ${code} ${reason || ''}`);
         ready = false;
         if (closed) return;
-        console.log('[Upstox Feed] Reconnecting in 2 seconds...');
-        setTimeout(connect, 2000);
+        retryAttempt += 1;
+        const delay = Math.min(2000 * Math.pow(1.6, retryAttempt), 60_000);
+        console.log(`[Upstox Feed] Reconnecting in ${Math.round(delay / 1000)} seconds...`);
+        setTimeout(connect, delay);
       });
     } catch (e) {
       console.error('[Upstox Feed] ✗ Connection error:', e.message);
       emitter.emit("error", e);
       if (!closed) {
-        console.log('[Upstox Feed] Retrying in 3 seconds...');
-        setTimeout(connect, 3000);
+        retryAttempt += 1;
+        const msg = String(e?.message || '');
+        const invalidToken = msg.includes('UDAPI100050') || msg.includes('authorize failed: 401') || msg.includes('Invalid token');
+
+        let delay = Math.min(3000 * Math.pow(1.7, retryAttempt), 60_000);
+        if (invalidToken) {
+          delay = Math.max(delay, 60_000);
+          const now = Date.now();
+          if (now - lastAuthWarnAt > 60_000) {
+            console.warn('[Upstox Feed] Invalid/expired Upstox token detected. Next retry in 60s. Update token from app settings/login.');
+            lastAuthWarnAt = now;
+          }
+        }
+
+        console.log(`[Upstox Feed] Retrying in ${Math.round(delay / 1000)} seconds...`);
+        setTimeout(connect, delay);
       }
     }
   }

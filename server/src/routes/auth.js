@@ -52,16 +52,18 @@ router.post('/login', async (req, res) => {
     
     // Update upstox access token if provided
     if (upstoxAccessToken !== undefined) {
+      const nextToken = String(upstoxAccessToken || '').trim();
+      const oldToken = String(user.upstoxAccessToken || '');
       const oldTokenLength = user.upstoxAccessToken?.length || 0;
-      user.upstoxAccessToken = upstoxAccessToken;
+      user.upstoxAccessToken = nextToken;
       await user.save();
-      console.log(`[Login] User ${email} provided Upstox token (old: ${oldTokenLength} chars, new: ${upstoxAccessToken?.length || 0} chars)`);
+      console.log(`[Login] User ${email} provided Upstox token (old: ${oldTokenLength} chars, new: ${nextToken?.length || 0} chars)`);
       
       // Emit event to trigger reconnection if token changed
-      if (upstoxAccessToken && upstoxAccessToken !== user.upstoxAccessToken) {
+      if (nextToken && nextToken !== oldToken) {
         try {
           const { serverEvents } = await import('../index.js');
-          serverEvents.emit('upstox-token-updated', upstoxAccessToken);
+          serverEvents.emit('upstox-token-updated', nextToken);
           console.log('[Login] Server reconnection event emitted');
         } catch (e) {
           console.warn('[Login] Could not emit reconnection event:', e.message);
@@ -96,22 +98,26 @@ router.put('/upstox-token', async (req, res) => {
     if (!decoded) return res.status(401).json({ message: 'Invalid token' });
     
     const { upstoxAccessToken } = req.body;
+    const nextToken = String(upstoxAccessToken || '').trim();
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     
+    const oldToken = String(user.upstoxAccessToken || '');
     const oldTokenLength = user.upstoxAccessToken?.length || 0;
-    user.upstoxAccessToken = upstoxAccessToken || '';
+    user.upstoxAccessToken = nextToken;
     await user.save();
     
-    console.log(`[Token Update] User ${user.email} updated Upstox token (old: ${oldTokenLength} chars, new: ${upstoxAccessToken?.length || 0} chars)`);
+    console.log(`[Token Update] User ${user.email} updated Upstox token (old: ${oldTokenLength} chars, new: ${nextToken?.length || 0} chars)`);
     
     // Emit event to trigger reconnection
-    try {
-      const { serverEvents } = await import('../index.js');
-      serverEvents.emit('upstox-token-updated', upstoxAccessToken);
-      console.log('[Token Update] Server reconnection event emitted');
-    } catch (e) {
-      console.warn('[Token Update] Could not emit reconnection event:', e.message);
+    if (nextToken && nextToken !== oldToken) {
+      try {
+        const { serverEvents } = await import('../index.js');
+        serverEvents.emit('upstox-token-updated', nextToken);
+        console.log('[Token Update] Server reconnection event emitted');
+      } catch (e) {
+        console.warn('[Token Update] Could not emit reconnection event:', e.message);
+      }
     }
     
     res.json({ 

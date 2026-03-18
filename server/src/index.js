@@ -81,25 +81,39 @@ app.options('*', cors());
 
 // Helper function to get active Upstox access token
 async function getActiveUpstoxToken() {
-  // First try environment variable
-  const envToken = process.env.UPSTOX_ACCESS_TOKEN;
-  if (envToken) {
-    console.log('[Token] Using Upstox access token from environment');
-    return envToken;
-  }
-  
-  // Try to find a user with a token
-  try {
-    const user = await User.findOne({ upstoxAccessToken: { $exists: true, $ne: '' } }).select('+upstoxAccessToken');
-    if (user && user.upstoxAccessToken) {
-      console.log(`[Token] Using Upstox access token from user: ${user.email}`);
-      return user.upstoxAccessToken;
+  const tokenSource = String(process.env.UPSTOX_TOKEN_SOURCE || 'db').toLowerCase();
+  const envToken = String(process.env.UPSTOX_ACCESS_TOKEN || '').trim();
+
+  const getDbToken = async () => {
+    try {
+      const user = await User.findOne({ upstoxAccessToken: { $exists: true, $ne: '' } }).select('+upstoxAccessToken email');
+      if (user && user.upstoxAccessToken) {
+        console.log(`[Token] Using Upstox access token from user: ${user.email}`);
+        return String(user.upstoxAccessToken).trim();
+      }
+    } catch (e) {
+      console.warn('[Token] Error retrieving user token:', e.message);
     }
-  } catch (e) {
-    console.warn('[Token] Error retrieving user token:', e.message);
+    return '';
+  };
+
+  if (tokenSource === 'env') {
+    if (envToken) {
+      console.log('[Token] Using Upstox access token from environment (UPSTOX_TOKEN_SOURCE=env)');
+      return envToken;
+    }
+    const dbToken = await getDbToken();
+    if (dbToken) return dbToken;
+  } else {
+    const dbToken = await getDbToken();
+    if (dbToken) return dbToken;
+    if (envToken) {
+      console.log('[Token] Using Upstox access token from environment (db token not found)');
+      return envToken;
+    }
   }
-  
-  console.warn('[Token] No Upstox access token found in environment or database');
+
+  console.warn('[Token] No Upstox access token found in database or environment');
   return null;
 }
 

@@ -66,6 +66,35 @@ export interface OptionSearchFilters {
   debug?: boolean;
 }
 
+function inferOptionTypeFromSymbol(symbol?: string | null) {
+  const s = String(symbol || '').toUpperCase();
+  if (/\bCE\b/.test(s)) return 'CE';
+  if (/\bPE\b/.test(s)) return 'PE';
+  return null;
+}
+
+function inferStrikeFromSymbol(symbol?: string | null) {
+  const s = String(symbol || '');
+  const match = s.match(/\b(\d+(?:\.\d+)?)\s+(?:CE|PE)\b/i);
+  if (!match?.[1]) return null;
+  const strike = Number(match[1]);
+  return Number.isFinite(strike) ? strike : null;
+}
+
+function normalizeInstrument(item: InstrumentSearchItem): InstrumentSearchItem {
+  const resolvedOptionType = item.optionType || inferOptionTypeFromSymbol(item.tradingSymbol);
+  const directStrike = Number(item.strike);
+  const resolvedStrike = Number.isFinite(directStrike) && directStrike > 0
+    ? directStrike
+    : inferStrikeFromSymbol(item.tradingSymbol);
+
+  return {
+    ...item,
+    optionType: resolvedOptionType,
+    strike: resolvedStrike,
+  };
+}
+
 async function request(path: string, options: { method?: string; body?: unknown } = {}) {
   let response: Response;
   try {
@@ -180,7 +209,7 @@ export async function searchOptionContracts(filters: OptionSearchFilters = {}) {
   if (filters.debug) params.set('debug', '1');
 
   const data = await request(`/instruments/search?${params.toString()}`);
-  return (data?.results || []) as InstrumentSearchItem[];
+  return ((data?.results || []) as InstrumentSearchItem[]).map(normalizeInstrument);
 }
 
 export async function getOptionFilterMeta(
