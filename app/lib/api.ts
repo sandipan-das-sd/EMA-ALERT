@@ -10,12 +10,18 @@ export interface AppUser {
 }
 
 async function request(path: string, options: { method?: string; body?: unknown } = {}) {
-  const response = await fetch(`${APP_CONFIG.apiBase}${path}`, {
-    method: options.method || "GET",
-    headers: options.body ? { "Content-Type": "application/json" } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${APP_CONFIG.apiBase}${path}`, {
+      method: options.method || "GET",
+      headers: options.body ? { "Content-Type": "application/json" } : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      credentials: "include",
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "Network request failed";
+    throw new Error(`Network request failed. Check API URL: ${APP_CONFIG.apiBase} (${reason})`);
+  }
 
   if (!response.ok) {
     let message = "Request failed";

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -18,6 +19,7 @@ export default function SignupScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -67,14 +69,23 @@ export default function SignupScreen() {
             onChangeText={setEmail}
             style={[styles.input, { color: palette.text, borderColor: palette.border }]}
           />
-          <TextInput
-            placeholder="Password (min 8 chars)"
-            placeholderTextColor={palette.muted}
-            value={password}
-            secureTextEntry
-            onChangeText={setPassword}
-            style={[styles.input, { color: palette.text, borderColor: palette.border }]}
-          />
+          <View style={[styles.passwordWrap, { borderColor: palette.border }]}> 
+            <TextInput
+              placeholder="Password (min 8 chars)"
+              placeholderTextColor={palette.muted}
+              value={password}
+              secureTextEntry={!showPassword}
+              onChangeText={setPassword}
+              style={[styles.passwordInput, { color: palette.text }]}
+            />
+            <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={10}>
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={22}
+                color={palette.muted}
+              />
+            </Pressable>
+          </View>
 
           <Pressable onPress={handleSubmit} disabled={loading} style={[styles.button, { backgroundColor: palette.accent }]}> 
             <ThemedText style={styles.buttonText}>{loading ? "Creating..." : "Sign Up"}</ThemedText>
@@ -110,6 +121,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 16,
+  },
+  passwordWrap: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 2,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 10,
+    paddingRight: 8,
   },
   button: {
     borderRadius: 12,
