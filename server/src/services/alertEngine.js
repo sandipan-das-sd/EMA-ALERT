@@ -72,7 +72,7 @@ export function startAlertEngine({
   const stopRef = { stopped: false };
   const workingKeyCache = new Map();
   const failureCount = new Map();
-  const permanentlyFailed = new Set();
+  const permanentlyFailedUntil = new Map();
   const historicalCache = new Map();
   const sentAlerts = new Map();
 
@@ -87,6 +87,10 @@ export function startAlertEngine({
   const MAX_CACHE_KEYS = (() => {
     const v = parseInt(process.env.ALERT_CACHE_MAX_KEYS, 10);
     return Number.isFinite(v) && v > 0 ? v : 5_000;
+  })();
+  const FAILED_RETRY_MS = (() => {
+    const v = parseInt(process.env.ALERT_FAILED_RETRY_MS, 10);
+    return Number.isFinite(v) && v > 0 ? v : 30 * 60 * 1000;
   })();
   let lastNoInstrumentsWarnAt = 0;
   let lastCriticalWarnAt = 0;
@@ -117,12 +121,22 @@ export function startAlertEngine({
     }
     pruneMapToSize(sentAlerts, MAX_SENT_ALERTS);
   };
+
+  const pruneExpiredPermanentFailures = (now = Date.now()) => {
+    for (const [key, retryAt] of permanentlyFailedUntil.entries()) {
+      if (!Number.isFinite(retryAt) || now >= retryAt) {
+        permanentlyFailedUntil.delete(key);
+      }
+    }
+    pruneMapToSize(permanentlyFailedUntil, MAX_CACHE_KEYS);
+  };
   
   // Cleanup function to prevent memory leak
   const cleanupDailyData = () => {
     const now = Date.now();
     if (now - lastPruneAt > 10 * 60 * 1000) {
       pruneOldSentAlerts(now);
+      pruneExpiredPermanentFailures(now);
       pruneMapToSize(workingKeyCache, MAX_CACHE_KEYS);
       pruneMapToSize(failureCount, MAX_CACHE_KEYS);
       pruneMapToSize(historicalCache, MAX_CACHE_KEYS);
@@ -134,6 +148,7 @@ export function startAlertEngine({
       console.log(`[AlertEngine] Daily cleanup: clearing ${sentAlerts.size} sent alerts`);
       sentAlerts.clear();
       historicalCache.clear();
+      permanentlyFailedUntil.clear();
       lastCleanupDate = today;
     }
   };
@@ -539,6 +554,8 @@ export function startAlertEngine({
   async function tick() {
     if (stopRef.stopped) return;
 
+    let nextTickDelay = intervalMs;
+
     try {
       // Daily cleanup to prevent memory leak
       cleanupDailyData();
@@ -552,14 +569,23 @@ export function startAlertEngine({
         new Set([].concat(...Array.from(userMap.values())))
       );
 
-      const keysToProcess = allKeys.filter((k) => !permanentlyFailed.has(k));
+      const now = Date.now();
+      const keysToProcess = allKeys.filter((k) => {
+        const retryAt = permanentlyFailedUntil.get(k);
+        if (!retryAt) return true;
+        if (now >= retryAt) {
+          permanentlyFailedUntil.delete(k);
+          return true;
+        }
+        return false;
+      });
 
       tickCount++;
       const shouldLog = tickCount % 10 === 1; // Only log every 10th tick
       
       if (shouldLog) {
         console.log(
-          `[AlertEngine] Tick #${tickCount}: Monitoring ${keysToProcess.length}/${allKeys.length} instruments (${permanentlyFailed.size} failed)`
+          `[AlertEngine] Tick #${tickCount}: Monitoring ${keysToProcess.length}/${allKeys.length} instruments (${permanentlyFailedUntil.size} cooling down)`
         );
       }
 
@@ -578,8 +604,10 @@ export function startAlertEngine({
             console.log('[AlertEngine] No user watchlists yet. Waiting for subscriptions...');
           }
         }
-        // Longer interval when no instruments available to reduce log spam
-        return setTimeout(tick, Math.max(intervalMs, 30_000));
+        // Use longer interval when no instruments are available.
+        // The actual scheduling happens once in finally to avoid duplicate timers.
+        nextTickDelay = Math.max(intervalMs, 30_000);
+        return;
       }
 
       const keyToSignal = new Map();
@@ -606,7 +634,7 @@ export function startAlertEngine({
 
                   if (data && data.length > 0) {
                     failureCount.delete(origKey);
-                    permanentlyFailed.delete(origKey);
+                    permanentlyFailedUntil.delete(origKey);
                     successfulKeys.add(origKey);
                   }
                 } else {
@@ -623,7 +651,7 @@ export function startAlertEngine({
                   data = result.data;
                   workingKeyCache.set(origKey, workingKey);
                   failureCount.delete(origKey);
-                  permanentlyFailed.delete(origKey);
+                  permanentlyFailedUntil.delete(origKey);
                   successfulKeys.add(origKey);
 
                   if (workingKey !== origKey) {
@@ -640,9 +668,9 @@ export function startAlertEngine({
                   );
 
                   if (failures >= 5) {
-                    permanentlyFailed.add(origKey);
+                    permanentlyFailedUntil.set(origKey, Date.now() + FAILED_RETRY_MS);
                     console.log(
-                      `[AlertEngine] ⛔ Skipping ${origKey} after ${failures} failures`
+                      `[AlertEngine] ⛔ Cooling down ${origKey} after ${failures} failures (retry in ${Math.round(FAILED_RETRY_MS / 1000)}s)`
                     );
                   }
                 }
@@ -928,9 +956,7 @@ export function startAlertEngine({
       }
     } finally {
       if (!stopRef.stopped) {
-        // Add delay on error to prevent rapid crash loops
-        const delay = intervalMs;
-        setTimeout(tick, delay);
+        setTimeout(tick, nextTickDelay);
       }
     }
   }
