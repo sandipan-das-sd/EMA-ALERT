@@ -1,20 +1,35 @@
 import { useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { requestPushPermissions, configureNotifications } from '../services/push-notification-service';
-import { useAlertContext } from '@/contexts/alert-context';
+import { APP_CONFIG } from '@/lib/config';
 
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'http://localhost:4000';
+const API_BASE = APP_CONFIG.apiBase;
+const PUSH_TOKEN_ENDPOINT = `${API_BASE.replace(/\/$/, '')}/auth/push-token`;
+
+type NotificationSubscription = { remove: () => void };
+
+async function loadNotifications() {
+  return import('expo-notifications');
+}
+
+function isExpoGoClient() {
+  return Constants.executionEnvironment === 'storeClient';
+}
 
 /**
  * Hook to manage push notification setup and token registration
  */
 export function usePushNotifications() {
-  const { state } = useAlertContext();
-  const notificationListener = useRef<Notifications.Subscription | null>(null);
-  const responseListener = useRef<Notifications.Subscription | null>(null);
+  const notificationListener = useRef<NotificationSubscription | null>(null);
+  const responseListener = useRef<NotificationSubscription | null>(null);
   const registeredRef = useRef(false);
 
   useEffect(() => {
+    if (isExpoGoClient()) {
+      console.log('[Push Hook] Expo Go detected. Skipping remote push setup.');
+      return;
+    }
+
     // Configure notification handler
     configureNotifications();
 
@@ -28,7 +43,7 @@ export function usePushNotifications() {
           console.log('[Push Hook] Registering token with backend...');
           
           try {
-            const response = await fetch(`${API_BASE}/auth/push-token`, {
+            const response = await fetch(PUSH_TOKEN_ENDPOINT, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
@@ -52,19 +67,24 @@ export function usePushNotifications() {
 
     setupPush();
 
-    // Listen for incoming notifications
-    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('[Push Hook] Notification received:', notification.request.content.title);
-    });
+    loadNotifications()
+      .then((Notifications) => {
+        // Listen for incoming notifications
+        notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
+          console.log('[Push Hook] Notification received:', notification.request.content.title);
+        });
 
-    // Listen for user interactions with notifications
-    responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      console.log('[Push Hook] User interacted with notification:', response.notification.request.content.title);
-      // You can navigate or dispatch actions here based on notification data
-      if (response.notification.request.content.data) {
-        console.log('[Push Hook] Notification data:', response.notification.request.content.data);
-      }
-    });
+        // Listen for user interactions with notifications
+        responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+          console.log('[Push Hook] User interacted with notification:', response.notification.request.content.title);
+          if (response.notification.request.content.data) {
+            console.log('[Push Hook] Notification data:', response.notification.request.content.data);
+          }
+        });
+      })
+      .catch((error) => {
+        console.warn('[Push Hook] Failed to attach notification listeners:', error);
+      });
 
     // Cleanup
     return () => {

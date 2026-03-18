@@ -1,19 +1,38 @@
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+
+async function loadNotifications() {
+  return import('expo-notifications');
+}
+
+function isExpoGoClient() {
+  return Constants.executionEnvironment === 'storeClient';
+}
 
 /**
  * Configure notification handler
  */
 export function configureNotifications() {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
-  });
+  if (isExpoGoClient()) {
+    console.log('[Push] Expo Go detected. Remote push is disabled in Expo Go SDK 53+.');
+    return;
+  }
+
+  loadNotifications()
+    .then((Notifications) => {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+    })
+    .catch((error) => {
+      console.warn('[Push] Failed to initialize notification handler:', error);
+    });
 }
 
 /**
@@ -21,11 +40,18 @@ export function configureNotifications() {
  */
 export async function requestPushPermissions(): Promise<string | null> {
   try {
+    if (isExpoGoClient()) {
+      console.log('[Push] Skipping remote push token in Expo Go. Use a development build.');
+      return null;
+    }
+
     // Check if device is physical (not emulator/simulator)
     if (!Device.isDevice) {
       console.log('[Push] Not a physical device, skipping push token request');
       return null;
     }
+
+    const Notifications = await loadNotifications();
 
     // Get current permission status
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -57,6 +83,7 @@ export async function requestPushPermissions(): Promise<string | null> {
  */
 export async function clearAllNotifications() {
   try {
+    const Notifications = await loadNotifications();
     await Notifications.dismissAllNotificationsAsync();
     console.log('[Push] Cleared all notifications');
   } catch (error) {
@@ -73,6 +100,7 @@ export async function sendLocalNotification(
   data?: Record<string, string>
 ) {
   try {
+    const Notifications = await loadNotifications();
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
