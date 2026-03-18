@@ -8,7 +8,15 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useAlertContext } from '@/contexts/alert-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getMarketSnapshot, getWatchlist, type MarketIndexItem, type WatchlistItem } from '@/lib/api';
+import {
+  getBatchLtp,
+  getMarketSnapshot,
+  getMarketStatus,
+  getWatchlist,
+  type MarketIndexItem,
+  type MarketStatus,
+  type WatchlistItem,
+} from '@/lib/api';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -17,6 +25,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [indices, setIndices] = useState<MarketIndexItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
   const [marketLoading, setMarketLoading] = useState(true);
   const [marketError, setMarketError] = useState('');
 
@@ -30,6 +39,8 @@ export default function HomeScreen() {
       getWatchlist(),
     ]);
 
+    const statusResult = await Promise.allSettled([getMarketStatus()]);
+
     const errorParts: string[] = [];
 
     if (indicesResult.status === 'fulfilled') {
@@ -40,10 +51,38 @@ export default function HomeScreen() {
     }
 
     if (watchlistResult.status === 'fulfilled') {
-      setWatchlist(watchlistResult.value || []);
+      let wl = watchlistResult.value || [];
+
+      // Fallback: fetch direct LTP if watchlist has items but no cached prices yet.
+      const missingPriceKeys = wl.filter((w) => typeof w.price !== 'number').map((w) => w.key).filter(Boolean);
+      if (missingPriceKeys.length > 0) {
+        try {
+          const ltpMap = await getBatchLtp(missingPriceKeys);
+          wl = wl.map((item) => {
+            const quote = ltpMap[item.key];
+            if (!quote || typeof quote.last_price !== 'number') return item;
+            const cp = typeof quote.cp === 'number' ? quote.cp : null;
+            const changePct = cp && cp > 0 ? ((quote.last_price - cp) / cp) * 100 : null;
+            return {
+              ...item,
+              price: quote.last_price,
+              changePct,
+              change: cp ? quote.last_price - cp : null,
+            };
+          });
+        } catch {
+          // Keep base watchlist snapshot if direct LTP fallback fails.
+        }
+      }
+
+      setWatchlist(wl);
     } else {
       setWatchlist([]);
       errorParts.push(watchlistResult.reason instanceof Error ? watchlistResult.reason.message : 'Failed to load watchlist prices');
+    }
+
+    if (statusResult[0].status === 'fulfilled') {
+      setMarketStatus(statusResult[0].value);
     }
 
     if (errorParts.length) {
@@ -107,6 +146,11 @@ export default function HomeScreen() {
 
       <ThemedView style={[styles.statusCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 
         <ThemedText type="subtitle">Market Snapshot</ThemedText>
+        {marketStatus ? (
+          <ThemedText style={{ color: marketStatus.isOpen ? palette.success : palette.warning, marginTop: 4 }}>
+            {marketStatus.isOpen ? 'Market Open' : 'Market Closed'} · {marketStatus.openTime} - {marketStatus.closeTime} IST
+          </ThemedText>
+        ) : null}
         {marketError ? (
           <ThemedText style={{ color: palette.danger, marginTop: 6 }}>{marketError}</ThemedText>
         ) : null}

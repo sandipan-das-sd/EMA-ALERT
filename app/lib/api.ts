@@ -28,6 +28,17 @@ export interface MarketIndexItem {
   changePct?: number | null;
 }
 
+export interface MarketStatus {
+  timezone: string;
+  isOpen: boolean;
+  isWeekday: boolean;
+  nowIst: string;
+  openTime: string;
+  closeTime: string;
+  hasFeedData?: boolean;
+  hasQuoteData?: boolean;
+}
+
 export interface InstrumentSearchItem {
   key: string;
   tradingSymbol: string;
@@ -167,6 +178,19 @@ export async function getWatchlist() {
 export async function getMarketSnapshot() {
   const data = await request('/market/snapshot');
   return (data?.indices || []) as MarketIndexItem[];
+}
+
+export async function getMarketStatus() {
+  const data = await request('/market/status');
+  return (data || null) as MarketStatus | null;
+}
+
+export async function getBatchLtp(keys: string[]) {
+  if (!keys.length) return {} as Record<string, any>;
+  const params = new URLSearchParams();
+  params.set('keys', keys.join(','));
+  const data = await request(`/market/ltp?${params.toString()}`);
+  return (data?.data || {}) as Record<string, any>;
 }
 
 export async function addToWatchlist(instrumentKey: string) {

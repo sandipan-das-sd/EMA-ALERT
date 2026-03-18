@@ -939,6 +939,38 @@ feed.on('error', (err) => {
       }
     });
 
+    const getMarketStatusIST = () => {
+      const now = new Date();
+      const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+      const day = istNow.getUTCDay(); // 0 Sun ... 6 Sat
+      const h = istNow.getUTCHours();
+      const m = istNow.getUTCMinutes();
+      const mins = h * 60 + m;
+
+      const isWeekday = day >= 1 && day <= 5;
+      const openMins = 9 * 60 + 15;
+      const closeMins = 15 * 60 + 30;
+      const isOpen = isWeekday && mins >= openMins && mins <= closeMins;
+
+      return {
+        timezone: 'Asia/Kolkata',
+        isOpen,
+        isWeekday,
+        nowIst: istNow.toISOString().replace('Z', '+05:30'),
+        openTime: '09:15',
+        closeTime: '15:30',
+      };
+    };
+
+    app.get('/api/market/status', (req, res) => {
+      const status = getMarketStatusIST();
+      res.json({
+        ...status,
+        hasFeedData: Object.keys(marketState.lastTicks || {}).length > 0,
+        hasQuoteData: Object.keys(marketState.latestQuotes || {}).length > 0,
+      });
+    });
+
     app.get('/api/market/snapshot', (req, res) => {
       const indices = indexKeys.map(key => ({
         key,
@@ -946,7 +978,7 @@ feed.on('error', (err) => {
         cp: marketState.latestQuotes[key]?.cp ?? null,
         changePct: marketState.latestQuotes[key]?.changePct ?? null,
       }));
-      res.json({ indices, ts: Date.now() });
+      res.json({ indices, status: getMarketStatusIST(), ts: Date.now() });
     });
 
     // Serve the instrument universe to clients
