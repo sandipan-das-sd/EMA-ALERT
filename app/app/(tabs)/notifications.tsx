@@ -22,7 +22,7 @@ export default function NotificationsScreen() {
         <View>
           <ThemedText type="title" style={styles.title}>Alerts</ThemedText>
           <ThemedText style={{ color: palette.muted }}>
-            {state.unreadCount} unread · {items.length} total
+            {state.unreadCount} unread · {items.length} in timeline
           </ThemedText>
         </View>
         <TouchableOpacity
@@ -54,6 +54,9 @@ export default function NotificationsScreen() {
               </ThemedText>
               <ThemedText style={{ marginTop: 8 }}>
                 Close {a.close.toFixed(2)} crossed EMA {a.ema.toFixed(2)}
+              </ThemedText>
+              <ThemedText style={{ color: palette.muted, marginTop: 4, fontSize: 12 }}>
+                Instrument: {a.instrumentKey}
               </ThemedText>
             </ThemedView>
           ))

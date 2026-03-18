@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ImageBackground, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { showToast } from "@/lib/toast";
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme() ?? "light";
@@ -27,9 +28,11 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(email.trim(), password);
+      showToast("Login successful");
       router.replace("/upstox-token");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
+      showToast("Login failed");
     } finally {
       setLoading(false);
     }
@@ -45,9 +48,15 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
       <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
-        <ThemedText style={[styles.eyebrow, { color: palette.accent }]}>EMA ALERT</ThemedText>
-        <ThemedText type="title" style={styles.title}>Welcome Back</ThemedText>
-        <ThemedText style={[styles.subtitle, { color: palette.muted }]}>Log in to continue EMA alerts</ThemedText>
+        <ImageBackground
+          source={require('../assets/images/splash-icon.png')}
+          imageStyle={{ opacity: 0.14, borderRadius: 16 }}
+          style={[styles.brandCard, { borderColor: palette.border, backgroundColor: palette.card }]}
+        >
+          <ThemedText style={[styles.eyebrow, { color: palette.accent }]}>EMA ALERT SYSTEM</ThemedText>
+          <ThemedText type="title" style={styles.title}>Welcome Back</ThemedText>
+          <ThemedText style={[styles.subtitle, { color: palette.muted }]}>Log in to continue live market monitoring</ThemedText>
+        </ImageBackground>
 
         {error ? <ThemedText style={[styles.error, { color: palette.danger }]}>{error}</ThemedText> : null}
 
@@ -103,6 +112,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   eyebrow: { fontSize: 12, fontWeight: "800", letterSpacing: 1.2, marginBottom: 6 },
+  brandCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
   title: { fontSize: 28, lineHeight: 34 },
   subtitle: { marginTop: 6, marginBottom: 18 },
   error: { marginBottom: 10, fontWeight: "600" },

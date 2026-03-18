@@ -20,6 +20,7 @@ import {
   type OptionUnderlyingMeta,
   type WatchlistItem,
 } from '@/lib/api';
+import { showToast } from '@/lib/toast';
 
 const FO_SEGMENTS = ['NSE_FO', 'BSE_FO'];
 const OPTION_TYPES = ['ALL', 'CE', 'PE'] as const;
@@ -210,8 +211,10 @@ export default function WatchlistScreen() {
       setMutatingKey(item.key);
       await addToWatchlist(item.key);
       await loadWatchlist();
+      showToast(`${item.tradingSymbol || item.key} added to watchlist`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add instrument');
+      showToast('Could not add instrument');
     } finally {
       setMutatingKey(null);
     }
@@ -222,8 +225,10 @@ export default function WatchlistScreen() {
       setMutatingKey(itemKey);
       await removeFromWatchlist(itemKey);
       await loadWatchlist();
+      showToast('Removed from watchlist');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to remove instrument');
+      showToast('Could not remove instrument');
     } finally {
       setMutatingKey(null);
     }

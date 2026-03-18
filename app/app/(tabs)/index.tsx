@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ImageBackground, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 
@@ -20,7 +20,7 @@ import {
 } from '@/lib/api';
 
 export default function HomeScreen() {
-  const DASHBOARD_DEBUG = true;
+  const DASHBOARD_DEBUG = __DEV__;
   const logDashboard = (...args: any[]) => {
     if (!DASHBOARD_DEBUG) return;
     console.log('[Dashboard Debug]', ...args);
@@ -206,12 +206,16 @@ export default function HomeScreen() {
       <ScrollView
         contentContainerStyle={{ paddingTop: Math.max(insets.top, 10), paddingBottom: insets.bottom + 90 }}
         showsVerticalScrollIndicator={false}>
-      <ThemedView style={[styles.hero, { backgroundColor: palette.card, borderColor: palette.border }]}> 
-        <ThemedText type="title" style={styles.heroTitle}>EMA Alert Control</ThemedText>
+      <ImageBackground
+        source={require('../../assets/images/splash-icon.png')}
+        imageStyle={{ opacity: 0.12, resizeMode: 'cover' }}
+        style={[styles.hero, { backgroundColor: palette.card, borderColor: palette.border }]}
+      >
+        <ThemedText type="title" style={styles.heroTitle}>EMA ALERT SYSTEM</ThemedText>
         <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
-          Monitor crossover signals with live websocket feed and mobile notification control.
+          Smart market monitoring with live indices, watchlist prices, and EMA crossover alerts.
         </ThemedText>
-      </ThemedView>
+      </ImageBackground>
 
       <View style={styles.statsRow}>
         <ThemedView style={[styles.statCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 

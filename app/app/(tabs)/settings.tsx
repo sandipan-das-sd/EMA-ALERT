@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Constants from "expo-constants";
 
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useAuthContext } from "@/contexts/auth-context";
-import { APP_CONFIG } from "@/lib/config";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { showToast } from "@/lib/toast";
 
 function ToggleRow({
   label,
@@ -45,8 +44,6 @@ export default function SettingsScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const isExpoGo = Constants.executionEnvironment === "storeClient";
-
   async function handleTokenUpdate() {
     if (!upstoxToken.trim()) return;
     setLoading(true);
@@ -57,10 +54,21 @@ export default function SettingsScreen() {
       await refreshMe();
       setUpstoxToken("");
       setMessage("Upstox token updated successfully.");
+      showToast("Token updated. Market data will reconnect automatically.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update token");
+      showToast("Token update failed.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await logout();
+      showToast("Logged out successfully.");
+    } catch {
+      showToast("Logout failed. Please try again.");
     }
   }
 
@@ -70,7 +78,7 @@ export default function SettingsScreen() {
         contentContainerStyle={{ paddingTop: Math.max(insets.top, 10), paddingBottom: insets.bottom + 90, gap: 14 }}
         showsVerticalScrollIndicator={false}>
       <ThemedText type="title" style={styles.title}>Settings</ThemedText>
-      <ThemedText style={{ color: palette.muted }}>Signed in as {user?.email || "Unknown"}</ThemedText>
+      <ThemedText style={{ color: palette.muted }}>Signed in as {user?.email || "Unknown user"}</ThemedText>
 
       <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
         <ToggleRow
@@ -91,7 +99,7 @@ export default function SettingsScreen() {
         />
         <ToggleRow
           label="In-App Sound"
-          hint="Prepare for push/local notification sound"
+          hint="Play an in-app cue for new alerts"
           value={state.preferences.inAppSoundEnabled}
           onValueChange={(value) =>
             dispatch({ type: "SET_PREFERENCES", payload: { inAppSoundEnabled: value } })
@@ -127,17 +135,7 @@ export default function SettingsScreen() {
         </Pressable>
       </ThemedView>
 
-      <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
-        <ThemedText type="defaultSemiBold">Connection</ThemedText>
-        <ThemedText style={styles.rowText}>API: {APP_CONFIG.apiBase}</ThemedText>
-        <ThemedText style={styles.rowText}>WS: {APP_CONFIG.wsUrl}</ThemedText>
-        <ThemedText style={styles.rowText}>
-          Stream: {state.stream.connected ? "Connected" : "Disconnected"}
-        </ThemedText>
-        <ThemedText style={styles.rowText}>Push: {isExpoGo ? "Expo Go (disabled)" : "Enabled by permission"}</ThemedText>
-      </ThemedView>
-
-      <Pressable onPress={logout} style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.card }]}> 
+      <Pressable onPress={handleLogout} style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.card }]}> 
         <ThemedText style={{ color: palette.text, fontWeight: "700" }}>Log Out</ThemedText>
       </Pressable>
       </ScrollView>
@@ -162,7 +160,6 @@ const styles = StyleSheet.create({
   },
   toggleLeft: { flex: 1, gap: 2 },
   hintText: { opacity: 0.7, fontSize: 12, lineHeight: 18 },
-  rowText: { opacity: 0.75, fontSize: 13, lineHeight: 18 },
   input: {
     borderWidth: 1,
     borderRadius: 12,
