@@ -87,15 +87,41 @@ export default function HomeScreen() {
       if (missingPriceKeys.length > 0) {
         try {
           const ltpMap = await getBatchLtp(missingPriceKeys);
+          const pickQuoteForItem = (item: WatchlistItem) => {
+            const key = String(item.key || '');
+            const segment = String(item.segment || key.split(/[|:]/)[0] || '');
+            const ts = String(item.tradingSymbol || '').trim();
+            const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
+
+            const variants = new Set<string>([key]);
+            if (key.includes('|')) variants.add(key.replace('|', ':'));
+            if (key.includes(':')) variants.add(key.replace(':', '|'));
+            if (segment && tsNoSpace) {
+              variants.add(`${segment}:${tsNoSpace}`);
+              variants.add(`${segment}|${tsNoSpace}`);
+            }
+
+            for (const v of variants) {
+              const q = (ltpMap as any)?.[v];
+              if (q && typeof q.last_price === 'number') {
+                return { quote: q, matchedKey: v };
+              }
+            }
+            return { quote: null, matchedKey: null };
+          };
+
           logDashboard('Batch LTP fallback success', {
             returnedKeys: Object.keys(ltpMap || {}),
             sample: Object.entries(ltpMap || {}).slice(0, 3),
           });
           wl = wl.map((item) => {
-            const quote = ltpMap[item.key];
+            const { quote, matchedKey } = pickQuoteForItem(item);
             if (!quote || typeof quote.last_price !== 'number') return item;
             const cp = typeof quote.cp === 'number' ? quote.cp : null;
             const changePct = cp && cp > 0 ? ((quote.last_price - cp) / cp) * 100 : null;
+            if (matchedKey && matchedKey !== item.key) {
+              logDashboard('Watchlist LTP alias matched', { key: item.key, matchedKey });
+            }
             return {
               ...item,
               price: quote.last_price,

@@ -875,6 +875,29 @@ feed.on('error', (err) => {
             if (k.includes(':')) normalized[k.replace(':', '|')] = v;
           });
 
+          // Alias requested keys (e.g., NSE_FO|62605) to returned symbol-style keys when possible.
+          keys.forEach((requestedKey) => {
+            if (normalized[requestedKey]) return;
+
+            try {
+              const inst = instrumentsSearchService.getInstrument(requestedKey);
+              if (!inst?.segment || !inst?.tradingSymbol) return;
+
+              const noSpace = String(inst.tradingSymbol).replace(/\s+/g, '').toUpperCase();
+              const candA = `${inst.segment}:${noSpace}`;
+              const candB = `${inst.segment}|${noSpace}`;
+              const hit = normalized[candA] || normalized[candB];
+
+              if (hit) {
+                normalized[requestedKey] = hit;
+                if (requestedKey.includes('|')) normalized[requestedKey.replace('|', ':')] = hit;
+                if (requestedKey.includes(':')) normalized[requestedKey.replace(':', '|')] = hit;
+              }
+            } catch {
+              // best-effort aliasing only
+            }
+          });
+
           if (process.env.DEBUG_UPSTOX) {
             console.log('[LTP Batch] Requested keys:', keys.slice(0, 10));
             console.log('[LTP Batch] Returned keys:', Object.keys(merged).slice(0, 10));
