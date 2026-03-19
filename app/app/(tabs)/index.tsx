@@ -11,11 +11,15 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { APP_CONFIG } from '@/lib/config';
 import {
   getBatchLtp,
+  getMarketHolidays,
   getMarketSnapshot,
   getMarketStatus,
+  getMarketTimings,
   getWatchlist,
+  type MarketHolidayItem,
   type MarketIndexItem,
   type MarketStatus,
+  type MarketTimingItem,
   type WatchlistItem,
 } from '@/lib/api';
 
@@ -37,6 +41,8 @@ export default function HomeScreen() {
   const [indices, setIndices] = useState<MarketIndexItem[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  const [marketTimings, setMarketTimings] = useState<MarketTimingItem[]>([]);
+  const [marketHolidays, setMarketHolidays] = useState<MarketHolidayItem[]>([]);
   const [marketLoading, setMarketLoading] = useState(true);
   const [marketError, setMarketError] = useState('');
 
@@ -86,7 +92,11 @@ export default function HomeScreen() {
       getWatchlist(),
     ]);
 
-    const statusResult = await Promise.allSettled([getMarketStatus()]);
+    const [statusResult, timingsResult, holidaysResult] = await Promise.allSettled([
+      getMarketStatus(),
+      getMarketTimings(),
+      getMarketHolidays(),
+    ]);
     let finalIndicesCount = 0;
     let finalWatchlistCount = 0;
     let finalWatchlistWithPrice = 0;
@@ -176,12 +186,34 @@ export default function HomeScreen() {
       errorParts.push(watchlistResult.reason instanceof Error ? watchlistResult.reason.message : 'Failed to load watchlist prices');
     }
 
-    if (statusResult[0].status === 'fulfilled') {
-      setMarketStatus(statusResult[0].value);
-      finalStatusOpen = Boolean(statusResult[0].value?.isOpen);
-      logDashboard('Market status success', statusResult[0].value);
+    if (statusResult.status === 'fulfilled') {
+      setMarketStatus(statusResult.value);
+      finalStatusOpen = Boolean(statusResult.value?.isOpen);
+      logDashboard('Market status success', statusResult.value);
     } else {
-      logDashboard('Market status failed', statusResult[0].reason);
+      logDashboard('Market status failed', statusResult.reason);
+    }
+
+    if (timingsResult.status === 'fulfilled') {
+      setMarketTimings(timingsResult.value || []);
+      logDashboard('Market timings success', {
+        count: (timingsResult.value || []).length,
+        sample: (timingsResult.value || []).slice(0, 4),
+      });
+    } else {
+      logDashboard('Market timings failed', timingsResult.reason);
+      errorParts.push(timingsResult.reason instanceof Error ? timingsResult.reason.message : 'Failed to load market timings');
+    }
+
+    if (holidaysResult.status === 'fulfilled') {
+      setMarketHolidays(holidaysResult.value || []);
+      logDashboard('Market holidays success', {
+        count: (holidaysResult.value || []).length,
+        sample: (holidaysResult.value || []).slice(0, 3),
+      });
+    } else {
+      logDashboard('Market holidays failed', holidaysResult.reason);
+      errorParts.push(holidaysResult.reason instanceof Error ? holidaysResult.reason.message : 'Failed to load market holidays');
     }
 
     if (errorParts.length) {
@@ -332,6 +364,17 @@ export default function HomeScreen() {
     return indices.slice(0, 2);
   })();
   const watchlistWithPrice = watchlist.filter((item) => typeof item.price === 'number').slice(0, 8);
+  const primaryExchanges = useMemo(
+    () => ['NSE', 'NFO', 'BSE', 'MCX'].map((ex) => marketTimings.find((t) => t.exchange === ex)).filter(Boolean) as MarketTimingItem[],
+    [marketTimings]
+  );
+  const upcomingHolidays = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return (marketHolidays || [])
+      .filter((h) => String(h.date) >= today)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .slice(0, 3);
+  }, [marketHolidays]);
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
@@ -364,7 +407,10 @@ export default function HomeScreen() {
         <ThemedText type="subtitle">Market Snapshot</ThemedText>
         {marketStatus ? (
           <ThemedText style={{ color: marketStatus.isOpen ? palette.success : palette.warning, marginTop: 4 }}>
-            {marketStatus.isOpen ? 'Market Open' : 'Market Closed'} · {marketStatus.openTime} - {marketStatus.closeTime} IST
+            {marketStatus.isOpen ? 'Market Open' : 'Market Closed'}
+            {marketStatus.exchange ? ` · ${marketStatus.exchange}` : ''}
+            {marketStatus.statusText ? ` · ${marketStatus.statusText}` : ''}
+            {marketStatus.openTime && marketStatus.closeTime ? ` · ${marketStatus.openTime} - ${marketStatus.closeTime} IST` : ''}
           </ThemedText>
         ) : null}
         {marketError ? (
@@ -395,6 +441,45 @@ export default function HomeScreen() {
           })
         ) : (
           <ThemedText style={styles.statusText}>No index data yet.</ThemedText>
+        )}
+      </ThemedView>
+
+      <ThemedView style={[styles.statusCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+        <ThemedText type="subtitle">Exchange Timings (Today)</ThemedText>
+        {marketLoading ? (
+          <ThemedText style={styles.statusText}>Loading exchange timings...</ThemedText>
+        ) : primaryExchanges.length ? (
+          primaryExchanges.map((item) => (
+            <View key={item.exchange} style={styles.marketRow}>
+              <ThemedText style={{ flex: 1 }}>{item.exchange}</ThemedText>
+              <ThemedText style={{ fontWeight: '700' }}>
+                {item.startTimeIst && item.endTimeIst ? `${item.startTimeIst} - ${item.endTimeIst}` : 'Closed'}
+              </ThemedText>
+            </View>
+          ))
+        ) : (
+          <ThemedText style={styles.statusText}>No exchange timing data available.</ThemedText>
+        )}
+      </ThemedView>
+
+      <ThemedView style={[styles.latestCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+        <ThemedText type="subtitle">Upcoming Market Holidays</ThemedText>
+        {marketLoading ? (
+          <ThemedText style={styles.statusText}>Loading holidays...</ThemedText>
+        ) : upcomingHolidays.length ? (
+          upcomingHolidays.map((holiday) => (
+            <View key={`${holiday.date}:${holiday.description}`} style={styles.marketRow}>
+              <View style={{ flex: 1 }}>
+                <ThemedText type="defaultSemiBold">{holiday.date}</ThemedText>
+                <ThemedText style={styles.statusText}>{holiday.description}</ThemedText>
+              </View>
+              <ThemedText style={{ color: palette.muted, textAlign: 'right' }}>
+                {holiday.closedExchanges?.length ? holiday.closedExchanges.join(', ') : 'Special Timing'}
+              </ThemedText>
+            </View>
+          ))
+        ) : (
+          <ThemedText style={styles.statusText}>No upcoming holidays found.</ThemedText>
         )}
       </ThemedView>
 

@@ -30,13 +30,41 @@ export interface MarketIndexItem {
 
 export interface MarketStatus {
   timezone: string;
+  exchange?: string;
   isOpen: boolean;
-  isWeekday: boolean;
+  isWeekday?: boolean;
   nowIst: string;
-  openTime: string;
-  closeTime: string;
+  openTime?: string | null;
+  closeTime?: string | null;
+  statusText?: string;
+  lastUpdated?: number | null;
+  source?: string;
   hasFeedData?: boolean;
   hasQuoteData?: boolean;
+}
+
+export interface MarketTimingItem {
+  exchange: string;
+  startTime?: number | null;
+  endTime?: number | null;
+  startTimeIst?: string | null;
+  endTimeIst?: string | null;
+}
+
+export interface MarketHolidayOpenExchange {
+  exchange: string;
+  startTime?: number | null;
+  endTime?: number | null;
+  startTimeIst?: string | null;
+  endTimeIst?: string | null;
+}
+
+export interface MarketHolidayItem {
+  date: string;
+  description: string;
+  holidayType: string;
+  closedExchanges: string[];
+  openExchanges: MarketHolidayOpenExchange[];
 }
 
 export interface InstrumentSearchItem {
@@ -183,6 +211,18 @@ export async function getMarketSnapshot() {
 export async function getMarketStatus() {
   const data = await request('/market/status');
   return (data || null) as MarketStatus | null;
+}
+
+export async function getMarketTimings(date?: string) {
+  const path = date ? `/market/timings/${encodeURIComponent(date)}` : '/market/timings';
+  const data = await request(path);
+  return (data?.data || []) as MarketTimingItem[];
+}
+
+export async function getMarketHolidays(date?: string) {
+  const path = date ? `/market/holidays/${encodeURIComponent(date)}` : '/market/holidays';
+  const data = await request(path);
+  return (data?.data || []) as MarketHolidayItem[];
 }
 
 export async function getBatchLtp(keys: string[]) {

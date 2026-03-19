@@ -997,7 +997,56 @@ feed.on('error', (err) => {
       }
     });
 
-    const getMarketStatusIST = () => {
+    const apiV2Base = process.env.UPSTOX_API_V2_BASE || 'https://api.upstox.com/v2';
+
+    const formatIstTime = (epochMs) => {
+      if (!epochMs || !Number.isFinite(Number(epochMs))) return null;
+      try {
+        return new Date(Number(epochMs)).toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+      } catch {
+        return null;
+      }
+    };
+
+    const todayIstYmd = () => {
+      const now = new Date();
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now);
+    };
+
+    const statusCache = new Map();
+    const timingsCache = new Map();
+    const holidaysCache = new Map();
+
+    async function fetchUpstoxV2(pathname) {
+      const headers = {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      };
+      if (tokenStore.current) {
+        headers.Authorization = `Bearer ${tokenStore.current}`;
+      }
+
+      const url = `${apiV2Base}${pathname}`;
+      const response = await fetch(url, { headers });
+      const json = await response.json().catch(() => null);
+      return {
+        ok: response.ok,
+        status: response.status,
+        json,
+      };
+    }
+
+    const getMarketStatusFallbackIST = () => {
       const now = new Date();
       const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
       const day = istNow.getUTCDay(); // 0 Sun ... 6 Sat
@@ -1020,13 +1069,155 @@ feed.on('error', (err) => {
       };
     };
 
-    app.get('/api/market/status', (req, res) => {
-      const status = getMarketStatusIST();
-      res.json({
-        ...status,
-        hasFeedData: Object.keys(marketState.lastTicks || {}).length > 0,
-        hasQuoteData: Object.keys(marketState.latestQuotes || {}).length > 0,
-      });
+    app.get('/api/market/status', async (req, res) => {
+      const exchange = String(req.query.exchange || 'NSE').toUpperCase();
+      const cacheKey = `status:${exchange}`;
+      const now = Date.now();
+      const cached = statusCache.get(cacheKey);
+      if (cached && now - cached.ts < 20_000) {
+        return res.json(cached.data);
+      }
+
+      let payload;
+      try {
+        const [statusResp, timingsResp] = await Promise.all([
+          fetchUpstoxV2(`/market/status/${encodeURIComponent(exchange)}`),
+          fetchUpstoxV2(`/market/timings/${todayIstYmd()}`),
+        ]);
+
+        const statusData = statusResp?.json?.data || {};
+        const statusText = String(statusData?.status || 'UNKNOWN');
+        const statusUpper = statusText.toUpperCase();
+        const isOpen = statusUpper.includes('OPEN') || statusUpper === 'NORMAL_OPEN';
+
+        const timingsList = Array.isArray(timingsResp?.json?.data) ? timingsResp.json.data : [];
+        const exchangeTiming = timingsList.find((x) => String(x.exchange || '').toUpperCase() === exchange) || null;
+
+        payload = {
+          timezone: 'Asia/Kolkata',
+          exchange,
+          isOpen,
+          statusText,
+          lastUpdated: statusData?.last_updated ?? null,
+          nowIst: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace(' ', 'T') + '+05:30',
+          openTime: formatIstTime(exchangeTiming?.start_time),
+          closeTime: formatIstTime(exchangeTiming?.end_time),
+          hasFeedData: Object.keys(marketState.lastTicks || {}).length > 0,
+          hasQuoteData: Object.keys(marketState.latestQuotes || {}).length > 0,
+          httpStatus: statusResp.status,
+          source: 'upstox-v2',
+          raw: {
+            status: statusResp.json,
+            timings: timingsResp.json,
+          },
+        };
+      } catch (e) {
+        const fallback = getMarketStatusFallbackIST();
+        payload = {
+          ...fallback,
+          exchange,
+          statusText: fallback.isOpen ? 'NORMAL_OPEN' : 'CLOSED',
+          lastUpdated: null,
+          hasFeedData: Object.keys(marketState.lastTicks || {}).length > 0,
+          hasQuoteData: Object.keys(marketState.latestQuotes || {}).length > 0,
+          source: 'fallback-ist',
+          error: e.message,
+        };
+      }
+
+      statusCache.set(cacheKey, { ts: now, data: payload });
+      res.json(payload);
+    });
+
+    app.get('/api/market/timings/:date?', async (req, res) => {
+      const date = String(req.params.date || req.query.date || todayIstYmd());
+      const cacheKey = `timings:${date}`;
+      const now = Date.now();
+      const cached = timingsCache.get(cacheKey);
+      if (cached && now - cached.ts < 60_000) {
+        return res.json(cached.data);
+      }
+
+      try {
+        const timingsResp = await fetchUpstoxV2(`/market/timings/${encodeURIComponent(date)}`);
+        const list = Array.isArray(timingsResp?.json?.data) ? timingsResp.json.data : [];
+        const normalized = list.map((x) => ({
+          exchange: x.exchange,
+          startTime: x.start_time ?? null,
+          endTime: x.end_time ?? null,
+          startTimeIst: formatIstTime(x.start_time),
+          endTimeIst: formatIstTime(x.end_time),
+        }));
+
+        const payload = {
+          date,
+          status: timingsResp?.json?.status || (timingsResp.ok ? 'success' : 'error'),
+          data: normalized,
+          httpStatus: timingsResp.status,
+          source: 'upstox-v2',
+          raw: timingsResp.json,
+        };
+
+        timingsCache.set(cacheKey, { ts: now, data: payload });
+        res.json(payload);
+      } catch (e) {
+        res.status(502).json({
+          date,
+          status: 'error',
+          message: 'Failed to fetch market timings',
+          error: e.message,
+        });
+      }
+    });
+
+    app.get('/api/market/holidays/:date?', async (req, res) => {
+      const date = String(req.params.date || req.query.date || '').trim();
+      const cacheKey = `holidays:${date || 'year'}`;
+      const now = Date.now();
+      const cached = holidaysCache.get(cacheKey);
+      if (cached && now - cached.ts < 5 * 60_000) {
+        return res.json(cached.data);
+      }
+
+      try {
+        const suffix = date ? `/market/holidays/${encodeURIComponent(date)}` : '/market/holidays';
+        const holidayResp = await fetchUpstoxV2(suffix);
+        const list = Array.isArray(holidayResp?.json?.data) ? holidayResp.json.data : [];
+        const normalized = list.map((x) => ({
+          date: x.date,
+          description: x.description,
+          holidayType: x.holiday_type,
+          closedExchanges: Array.isArray(x.closed_exchanges) ? x.closed_exchanges : [],
+          openExchanges: Array.isArray(x.open_exchanges)
+            ? x.open_exchanges.map((ex) => ({
+                exchange: ex.exchange,
+                startTime: ex.start_time ?? null,
+                endTime: ex.end_time ?? null,
+                startTimeIst: formatIstTime(ex.start_time),
+                endTimeIst: formatIstTime(ex.end_time),
+              }))
+            : [],
+        }));
+
+        const payload = {
+          date: date || null,
+          status: holidayResp?.json?.status || (holidayResp.ok ? 'success' : 'error'),
+          data: normalized,
+          httpStatus: holidayResp.status,
+          source: 'upstox-v2',
+          raw: holidayResp.json,
+        };
+
+        holidaysCache.set(cacheKey, { ts: now, data: payload });
+        res.json(payload);
+      } catch (e) {
+        res.status(502).json({
+          date: date || null,
+          status: 'error',
+          message: 'Failed to fetch market holidays',
+          error: e.message,
+        });
+      }
     });
 
     app.get('/api/market/snapshot', (req, res) => {
@@ -1036,7 +1227,7 @@ feed.on('error', (err) => {
         cp: marketState.latestQuotes[key]?.cp ?? null,
         changePct: marketState.latestQuotes[key]?.changePct ?? null,
       }));
-      res.json({ indices, status: getMarketStatusIST(), ts: Date.now() });
+      res.json({ indices, ts: Date.now() });
     });
 
     // Serve the instrument universe to clients
@@ -1164,44 +1355,6 @@ feed.on('error', (err) => {
         subscriptionStatus: lastSubStatus || null,
         ts: Date.now()
       });
-    });
-
-    // Market status proxy (v2)
-    const statusCache = new Map(); // key: exchange -> { ts, data }
-    app.get('/api/market/status', async (req, res) => {
-      const exchange = (req.query.exchange || 'NSE').toUpperCase();
-      const now = Date.now();
-      const cached = statusCache.get(exchange);
-      if (cached && now - cached.ts < 30_000) {
-        return res.json(cached.data);
-      }
-      const apiV2Base = process.env.UPSTOX_API_V2_BASE || 'https://api.upstox.com/v2';
-      const url = `${apiV2Base}/market/status/${encodeURIComponent(exchange)}`;
-      const headers = { Accept: 'application/json' };
-      if (tokenStore.current) headers.Authorization = `Bearer ${tokenStore.current}`;
-      let json = null;
-      let status = 500;
-      try {
-        const r = await fetch(url, { headers });
-        status = r.status;
-        json = await r.json().catch(() => null);
-      } catch (e) {
-        return res.status(502).json({ exchange, isOpen: null, statusText: 'Unavailable', error: e.message, ts: now });
-      }
-      // Normalize response into isOpen + statusText
-      const raw = json || {};
-      let isOpen = null;
-      let statusText = '';
-      // Try common shapes
-      const d = raw?.data || raw;
-      if (typeof d?.is_open === 'boolean') isOpen = d.is_open;
-      if (typeof d?.isOpen === 'boolean') isOpen = d.isOpen;
-      if (typeof d?.marketStatus?.is_open === 'boolean') isOpen = d.marketStatus.is_open;
-      if (typeof d?.market_status?.is_open === 'boolean') isOpen = d.market_status.is_open;
-      statusText = d?.status || d?.market_status?.status || d?.marketStatus?.status || (isOpen === true ? 'Open' : isOpen === false ? 'Closed' : 'Unknown');
-      const normalized = { exchange, isOpen, statusText, httpStatus: status, raw, ts: now };
-      statusCache.set(exchange, { ts: now, data: normalized });
-      res.json(normalized);
     });
 
     // Debug route to inspect current state
