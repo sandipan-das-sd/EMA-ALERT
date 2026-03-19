@@ -3,6 +3,15 @@
     "name": "EMA ALERT SYSTEM",
     "slug": "ema-alert-system",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "url": "https://u.expo.dev/ac4f5a3e-7b48-496c-b191-0343fb47552a",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "emaalertsystem",

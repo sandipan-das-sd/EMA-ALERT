@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useReducer } from "react";
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef } from "react";
 import type { PropsWithChildren } from "react";
 import type { Dispatch } from "react";
 import type { AlertAction, AlertState, EmaAlert } from "@/types/alert";
@@ -218,6 +218,7 @@ const AlertContext = createContext<AlertContextValue | null>(null);
 
 export function AlertProvider({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const hydratedRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -225,12 +226,17 @@ export function AlertProvider({ children }: PropsWithChildren) {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
-        if (!mounted || !raw) return;
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== "object") return;
-        dispatch({ type: "HYDRATE_PREFERENCES", payload: parsed });
+        if (!mounted) return;
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            dispatch({ type: "HYDRATE_PREFERENCES", payload: parsed });
+          }
+        }
       } catch (err) {
         console.warn("[Preferences] Failed to hydrate", err);
+      } finally {
+        hydratedRef.current = true;
       }
     })();
 
@@ -240,6 +246,7 @@ export function AlertProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     AsyncStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(state.preferences)).catch((err) => {
       console.warn("[Preferences] Failed to persist", err);
     });
