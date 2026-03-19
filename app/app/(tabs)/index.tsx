@@ -375,6 +375,40 @@ export default function HomeScreen() {
       .sort((a, b) => String(a.date).localeCompare(String(b.date)))
       .slice(0, 3);
   }, [marketHolidays]);
+  const todayIst = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date()),
+    []
+  );
+  const todayHoliday = useMemo(
+    () => (marketHolidays || []).find((h) => String(h.date) === todayIst) || null,
+    [marketHolidays, todayIst]
+  );
+  const todayHolidayExchangeText = useMemo(() => {
+    if (!todayHoliday) return '';
+    const closed = Array.isArray(todayHoliday.closedExchanges) ? todayHoliday.closedExchanges.filter(Boolean) : [];
+    if (closed.length > 0) return `Closed Exchanges: ${closed.join(', ')}`;
+    return 'No full-closure exchanges. Special timing may apply.';
+  }, [todayHoliday]);
+  const marketStatusLabel = useMemo(() => {
+    const raw = String(marketStatus?.statusText || '').toUpperCase();
+    if (!raw) return null;
+    const map: Record<string, string> = {
+      NORMAL_OPEN: 'Normal Open',
+      PRE_OPEN: 'Pre Open',
+      OPEN: 'Open',
+      CLOSED: 'Closed',
+      CLOSING_END: 'Market Closed',
+      CLOSING_START: 'Closing Session',
+      HOLIDAY: 'Holiday',
+    };
+    return map[raw] || raw.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [marketStatus?.statusText]);
   const marketStateTone = marketStatus?.isOpen ? palette.success : palette.warning;
   const streamTone = state.stream.connected ? palette.success : palette.danger;
   const streamText = state.stream.connected ? 'WebSocket Live' : 'WebSocket Reconnecting';
@@ -399,6 +433,11 @@ export default function HomeScreen() {
               {marketStatus?.isOpen ? 'Market Open' : 'Market Closed'}
             </ThemedText>
           </View>
+          {todayHoliday ? (
+            <View style={[styles.badge, { borderColor: palette.warning, backgroundColor: `${palette.warning}22` }]}>
+              <ThemedText style={[styles.badgeText, { color: palette.warning }]}>Holiday Today</ThemedText>
+            </View>
+          ) : null}
           <View style={[styles.badge, { borderColor: streamTone, backgroundColor: `${streamTone}22` }]}>
             <ThemedText style={[styles.badgeText, { color: streamTone }]}>{streamText}</ThemedText>
           </View>
@@ -424,8 +463,18 @@ export default function HomeScreen() {
           <ThemedText style={{ color: marketStatus.isOpen ? palette.success : palette.warning, marginTop: 4 }}>
             {marketStatus.isOpen ? 'Market Open' : 'Market Closed'}
             {marketStatus.exchange ? ` · ${marketStatus.exchange}` : ''}
-            {marketStatus.statusText ? ` · ${marketStatus.statusText}` : ''}
+            {marketStatusLabel ? ` · ${marketStatusLabel}` : ''}
             {marketStatus.openTime && marketStatus.closeTime ? ` · ${marketStatus.openTime} - ${marketStatus.closeTime} IST` : ''}
+          </ThemedText>
+        ) : null}
+        {todayHoliday ? (
+          <ThemedText style={{ color: palette.warning, marginTop: 2 }}>
+            Today Holiday: {todayHoliday.description}
+          </ThemedText>
+        ) : null}
+        {todayHolidayExchangeText ? (
+          <ThemedText style={{ color: palette.muted, marginTop: 2 }}>
+            {todayHolidayExchangeText}
           </ThemedText>
         ) : null}
         {marketError ? (
