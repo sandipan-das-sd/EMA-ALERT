@@ -1,7 +1,10 @@
-import { createContext, useContext, useMemo, useReducer } from "react";
+import { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 import type { PropsWithChildren } from "react";
 import type { Dispatch } from "react";
 import type { AlertAction, AlertState, EmaAlert } from "@/types/alert";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const PREFERENCES_STORAGE_KEY = "ema_alert_preferences_v1";
 
 const initialState: AlertState = {
   alerts: [],
@@ -19,7 +22,19 @@ const initialState: AlertState = {
     inAppSoundEnabled: false,
     pushNotificationsEnabled: true,
   },
+  market: {
+    indices: {},
+    quotes: {},
+    lastUpdateAt: null,
+  },
 };
+
+function keyVariants(key: string): string[] {
+  const out = [key];
+  if (key.includes("|")) out.push(key.replace("|", ":"));
+  if (key.includes(":")) out.push(key.replace(":", "|"));
+  return out;
+}
 
 function mergeAlert(list: EmaAlert[], next: EmaAlert): EmaAlert[] {
   const idx = list.findIndex((a) => a.id === next.id);
@@ -103,6 +118,92 @@ function reducer(state: AlertState, action: AlertAction): AlertState {
         },
       };
 
+    case "HYDRATE_PREFERENCES":
+      return {
+        ...state,
+        preferences: {
+          ...state.preferences,
+          ...action.payload,
+        },
+      };
+
+    case "MARKET_TICK": {
+      const key = String(action.payload.instrumentKey || "").trim();
+      if (!key) return state;
+
+      const nextQuotes = { ...state.market.quotes };
+      keyVariants(key).forEach((variant) => {
+        nextQuotes[variant] = {
+          ...nextQuotes[variant],
+          ltp: action.payload.ltp,
+          last_price: typeof action.payload.ltp === "number" ? action.payload.ltp : nextQuotes[variant]?.last_price,
+          cp: action.payload.cp,
+          changePct: action.payload.changePct,
+        };
+      });
+
+      return {
+        ...state,
+        market: {
+          ...state.market,
+          quotes: nextQuotes,
+          lastUpdateAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    case "MARKET_QUOTES": {
+      const nextQuotes = { ...state.market.quotes };
+      for (const q of action.payload || []) {
+        const rawKey = String(q.key || q.instrumentKey || "").trim();
+        if (!rawKey) continue;
+
+        const ltp = typeof q.last_price === "number" ? q.last_price : q.ltp;
+        keyVariants(rawKey).forEach((variant) => {
+          nextQuotes[variant] = {
+            ...nextQuotes[variant],
+            ...q,
+            ltp,
+            last_price: typeof ltp === "number" ? ltp : nextQuotes[variant]?.last_price,
+          };
+        });
+      }
+
+      return {
+        ...state,
+        market: {
+          ...state.market,
+          quotes: nextQuotes,
+          lastUpdateAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    case "MARKET_INDICES": {
+      const nextIndices = { ...state.market.indices };
+      for (const idx of action.payload || []) {
+        const rawKey = String(idx.key || "").trim();
+        if (!rawKey) continue;
+
+        keyVariants(rawKey).forEach((variant) => {
+          nextIndices[variant] = {
+            ltp: idx.ltp,
+            cp: idx.cp,
+            changePct: idx.changePct,
+          };
+        });
+      }
+
+      return {
+        ...state,
+        market: {
+          ...state.market,
+          indices: nextIndices,
+          lastUpdateAt: new Date().toISOString(),
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -117,6 +218,32 @@ const AlertContext = createContext<AlertContextValue | null>(null);
 
 export function AlertProvider({ children }: PropsWithChildren) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
+        if (!mounted || !raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return;
+        dispatch({ type: "HYDRATE_PREFERENCES", payload: parsed });
+      } catch (err) {
+        console.warn("[Preferences] Failed to hydrate", err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(state.preferences)).catch((err) => {
+      console.warn("[Preferences] Failed to persist", err);
+    });
+  }, [state.preferences]);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
 

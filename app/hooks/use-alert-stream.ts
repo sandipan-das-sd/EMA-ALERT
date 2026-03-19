@@ -58,7 +58,33 @@ export function useAlertStream(enabled = true) {
           try {
             const data = JSON.parse(event.data);
 
-            if (data.type === "tick" || data.type === "info") {
+            if (data.type === "tick") {
+              dispatch({
+                type: "MARKET_TICK",
+                payload: {
+                  instrumentKey: data.instrumentKey,
+                  ltp: data.ltp,
+                  cp: data.cp,
+                  changePct: data.changePct,
+                },
+              });
+              dispatch({ type: "STREAM_HEARTBEAT" });
+              return;
+            }
+
+            if (data.type === "quotes" && Array.isArray(data.data)) {
+              dispatch({ type: "MARKET_QUOTES", payload: data.data });
+              dispatch({ type: "STREAM_HEARTBEAT" });
+              return;
+            }
+
+            if (data.type === "indices" && Array.isArray(data.data)) {
+              dispatch({ type: "MARKET_INDICES", payload: data.data });
+              dispatch({ type: "STREAM_HEARTBEAT" });
+              return;
+            }
+
+            if (data.type === "info") {
               dispatch({ type: "STREAM_HEARTBEAT" });
               return;
             }

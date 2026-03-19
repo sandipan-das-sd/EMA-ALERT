@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ImageBackground, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -21,10 +21,14 @@ import {
 
 export default function HomeScreen() {
   const DASHBOARD_DEBUG = __DEV__;
-  const logDashboard = (...args: any[]) => {
-    if (!DASHBOARD_DEBUG) return;
-    console.log('[Dashboard Debug]', ...args);
-  };
+  const logDashboard = useMemo(
+    () =>
+      (...args: any[]) => {
+        if (!DASHBOARD_DEBUG) return;
+        console.log('[Dashboard Debug]', ...args);
+      },
+    [DASHBOARD_DEBUG]
+  );
 
   const colorScheme = useColorScheme() ?? 'light';
   const palette = Colors[colorScheme];
@@ -37,6 +41,33 @@ export default function HomeScreen() {
   const [marketError, setMarketError] = useState('');
 
   const latest = state.alerts[0];
+
+  const getWatchlistQuote = useCallback(
+    (item: WatchlistItem) => {
+      const key = String(item.key || '');
+      const segment = String(item.segment || key.split(/[|:]/)[0] || '');
+      const ts = String(item.tradingSymbol || '').trim();
+      const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
+      const variants = new Set<string>([key]);
+
+      if (key.includes('|')) variants.add(key.replace('|', ':'));
+      if (key.includes(':')) variants.add(key.replace(':', '|'));
+      if (segment && tsNoSpace) {
+        variants.add(`${segment}:${tsNoSpace}`);
+        variants.add(`${segment}|${tsNoSpace}`);
+      }
+
+      for (const variant of variants) {
+        const hit = state.market.quotes[variant];
+        if (hit && (typeof hit.last_price === 'number' || typeof hit.ltp === 'number')) {
+          return { quote: hit, matchedKey: variant };
+        }
+      }
+
+      return { quote: null, matchedKey: null };
+    },
+    [state.market.quotes]
+  );
 
   const loadDashboardMarketData = useCallback(async () => {
     logDashboard('Fetching market data', {
@@ -87,12 +118,15 @@ export default function HomeScreen() {
       if (missingPriceKeys.length > 0) {
         try {
           const ltpMap = await getBatchLtp(missingPriceKeys);
-          const pickQuoteForItem = (item: WatchlistItem) => {
+          logDashboard('Batch LTP fallback success', {
+            returnedKeys: Object.keys(ltpMap || {}),
+            sample: Object.entries(ltpMap || {}).slice(0, 3),
+          });
+          wl = wl.map((item) => {
             const key = String(item.key || '');
             const segment = String(item.segment || key.split(/[|:]/)[0] || '');
             const ts = String(item.tradingSymbol || '').trim();
             const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
-
             const variants = new Set<string>([key]);
             if (key.includes('|')) variants.add(key.replace('|', ':'));
             if (key.includes(':')) variants.add(key.replace(':', '|'));
@@ -101,32 +135,30 @@ export default function HomeScreen() {
               variants.add(`${segment}|${tsNoSpace}`);
             }
 
-            for (const v of variants) {
-              const q = (ltpMap as any)?.[v];
-              if (q && typeof q.last_price === 'number') {
-                return { quote: q, matchedKey: v };
+            let quote: any = null;
+            let matchedKey: string | null = null;
+            for (const variant of variants) {
+              const q = (ltpMap as any)?.[variant];
+              const lastPrice = q?.last_price ?? q?.ltp;
+              if (q && typeof lastPrice === 'number') {
+                quote = q;
+                matchedKey = variant;
+                break;
               }
             }
-            return { quote: null, matchedKey: null };
-          };
 
-          logDashboard('Batch LTP fallback success', {
-            returnedKeys: Object.keys(ltpMap || {}),
-            sample: Object.entries(ltpMap || {}).slice(0, 3),
-          });
-          wl = wl.map((item) => {
-            const { quote, matchedKey } = pickQuoteForItem(item);
-            if (!quote || typeof quote.last_price !== 'number') return item;
+            const lastPrice = quote?.last_price ?? quote?.ltp;
+            if (!quote || typeof lastPrice !== 'number') return item;
             const cp = typeof quote.cp === 'number' ? quote.cp : null;
-            const changePct = cp && cp > 0 ? ((quote.last_price - cp) / cp) * 100 : null;
+            const changePct = cp && cp > 0 ? ((lastPrice - cp) / cp) * 100 : null;
             if (matchedKey && matchedKey !== item.key) {
               logDashboard('Watchlist LTP alias matched', { key: item.key, matchedKey });
             }
             return {
               ...item,
-              price: quote.last_price,
+              price: lastPrice,
               changePct,
-              change: cp ? quote.last_price - cp : null,
+              change: cp ? lastPrice - cp : null,
             };
           });
         } catch {
@@ -170,19 +202,62 @@ export default function HomeScreen() {
     });
 
     setMarketLoading(false);
-  }, []);
+  }, [logDashboard]);
 
   useEffect(() => {
     loadDashboardMarketData();
-    const timer = setInterval(loadDashboardMarketData, 12_000);
+    const intervalMs = state.stream.connected ? 20_000 : 8_000;
+    const timer = setInterval(loadDashboardMarketData, intervalMs);
     return () => clearInterval(timer);
-  }, [loadDashboardMarketData]);
+  }, [loadDashboardMarketData, state.stream.connected]);
 
   useFocusEffect(
     useCallback(() => {
       loadDashboardMarketData();
     }, [loadDashboardMarketData])
   );
+
+  useEffect(() => {
+    if (!state.market.lastUpdateAt) return;
+
+    setIndices((prev) =>
+      prev.map((item) => {
+        const key = String(item.key || '');
+        const live = state.market.indices[key] || state.market.indices[key.replace('|', ':')] || state.market.indices[key.replace(':', '|')];
+        if (!live) return item;
+        return {
+          ...item,
+          ltp: typeof live.ltp === 'number' ? live.ltp : item.ltp,
+          cp: typeof live.cp === 'number' ? live.cp : item.cp,
+          changePct: typeof live.changePct === 'number' ? live.changePct : item.changePct,
+        };
+      })
+    );
+
+    setWatchlist((prev) =>
+      prev.map((item) => {
+        const { quote } = getWatchlistQuote(item);
+        if (!quote) return item;
+
+        const lastPrice = quote.last_price ?? quote.ltp;
+        if (typeof lastPrice !== 'number') return item;
+
+        const cp = typeof quote.cp === 'number' ? quote.cp : null;
+        const changePct = cp && cp > 0
+          ? ((lastPrice - cp) / cp) * 100
+          : typeof quote.changePct === 'number'
+            ? quote.changePct
+            : item.changePct;
+
+        return {
+          ...item,
+          price: lastPrice,
+          changePct,
+          change: cp ? lastPrice - cp : item.change,
+        };
+      })
+    );
+  }, [getWatchlistQuote, state.market.indices, state.market.lastUpdateAt]);
 
   const topIndices = (() => {
     const keyNorm = (k?: string | null) => String(k || '').toLowerCase().replace(/\s+/g, ' ').trim();
