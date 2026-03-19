@@ -42,21 +42,26 @@ export default function HomeScreen() {
 
   const latest = state.alerts[0];
 
+  const getWatchlistVariants = useCallback((item: WatchlistItem) => {
+    const key = String(item.key || '');
+    const segment = String(item.segment || key.split(/[|:]/)[0] || '');
+    const ts = String(item.tradingSymbol || '').trim();
+    const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
+    const variants = new Set<string>([key]);
+
+    if (key.includes('|')) variants.add(key.replace('|', ':'));
+    if (key.includes(':')) variants.add(key.replace(':', '|'));
+    if (segment && tsNoSpace) {
+      variants.add(`${segment}:${tsNoSpace}`);
+      variants.add(`${segment}|${tsNoSpace}`);
+    }
+
+    return Array.from(variants);
+  }, []);
+
   const getWatchlistQuote = useCallback(
     (item: WatchlistItem) => {
-      const key = String(item.key || '');
-      const segment = String(item.segment || key.split(/[|:]/)[0] || '');
-      const ts = String(item.tradingSymbol || '').trim();
-      const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
-      const variants = new Set<string>([key]);
-
-      if (key.includes('|')) variants.add(key.replace('|', ':'));
-      if (key.includes(':')) variants.add(key.replace(':', '|'));
-      if (segment && tsNoSpace) {
-        variants.add(`${segment}:${tsNoSpace}`);
-        variants.add(`${segment}|${tsNoSpace}`);
-      }
-
+      const variants = getWatchlistVariants(item);
       for (const variant of variants) {
         const hit = state.market.quotes[variant];
         if (hit && (typeof hit.last_price === 'number' || typeof hit.ltp === 'number')) {
@@ -66,7 +71,7 @@ export default function HomeScreen() {
 
       return { quote: null, matchedKey: null };
     },
-    [state.market.quotes]
+    [getWatchlistVariants, state.market.quotes]
   );
 
   const loadDashboardMarketData = useCallback(async () => {
@@ -123,17 +128,7 @@ export default function HomeScreen() {
             sample: Object.entries(ltpMap || {}).slice(0, 3),
           });
           wl = wl.map((item) => {
-            const key = String(item.key || '');
-            const segment = String(item.segment || key.split(/[|:]/)[0] || '');
-            const ts = String(item.tradingSymbol || '').trim();
-            const tsNoSpace = ts.replace(/\s+/g, '').toUpperCase();
-            const variants = new Set<string>([key]);
-            if (key.includes('|')) variants.add(key.replace('|', ':'));
-            if (key.includes(':')) variants.add(key.replace(':', '|'));
-            if (segment && tsNoSpace) {
-              variants.add(`${segment}:${tsNoSpace}`);
-              variants.add(`${segment}|${tsNoSpace}`);
-            }
+            const variants = getWatchlistVariants(item);
 
             let quote: any = null;
             let matchedKey: string | null = null;
@@ -202,7 +197,7 @@ export default function HomeScreen() {
     });
 
     setMarketLoading(false);
-  }, [logDashboard]);
+  }, [getWatchlistVariants, logDashboard]);
 
   useEffect(() => {
     loadDashboardMarketData();
@@ -258,6 +253,68 @@ export default function HomeScreen() {
       })
     );
   }, [getWatchlistQuote, state.market.indices, state.market.lastUpdateAt]);
+
+  const watchlistKeySignature = useMemo(
+    () => watchlist.map((item) => item.key).filter(Boolean).join(','),
+    [watchlist]
+  );
+
+  useEffect(() => {
+    if (!watchlistKeySignature) return;
+
+    let cancelled = false;
+
+    const refreshWatchlistFast = async () => {
+      try {
+        const keys = watchlistKeySignature.split(',').map((s) => s.trim()).filter(Boolean);
+        if (!keys.length) return;
+
+        const ltpMap = await getBatchLtp(keys);
+        if (cancelled) return;
+
+        setWatchlist((prev) =>
+          prev.map((item) => {
+            const variants = getWatchlistVariants(item);
+            let quote: any = null;
+
+            for (const variant of variants) {
+              const hit = (ltpMap as any)?.[variant];
+              const lastPrice = hit?.last_price ?? hit?.ltp;
+              if (hit && typeof lastPrice === 'number') {
+                quote = hit;
+                break;
+              }
+            }
+
+            const lastPrice = quote?.last_price ?? quote?.ltp;
+            if (typeof lastPrice !== 'number') return item;
+
+            const cp = typeof quote?.cp === 'number' ? quote.cp : null;
+            const changePct = cp && cp > 0
+              ? ((lastPrice - cp) / cp) * 100
+              : item.changePct;
+
+            return {
+              ...item,
+              price: lastPrice,
+              changePct,
+              change: cp ? lastPrice - cp : item.change,
+            };
+          })
+        );
+      } catch {
+        // Keep stream-driven prices if direct LTP refresh fails.
+      }
+    };
+
+    refreshWatchlistFast();
+    const timer = setInterval(refreshWatchlistFast, 4_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [getWatchlistVariants, watchlistKeySignature]);
 
   const topIndices = (() => {
     const keyNorm = (k?: string | null) => String(k || '').toLowerCase().replace(/\s+/g, ' ').trim();
