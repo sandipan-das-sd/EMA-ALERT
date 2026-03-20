@@ -34,6 +34,8 @@ export function useAlertStream(enabled = true) {
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const attemptRef = useRef(0);
   const notifiedIdsRef = useRef<Set<string>>(new Set());
+  const sessionStartedAtRef = useRef<number>(Date.now());
+  const initialPollSyncedRef = useRef(false);
 
   useEffect(() => {
     const known = new Set<string>();
@@ -76,8 +78,25 @@ export function useAlertStream(enabled = true) {
 
           if (isNew) {
             notifiedIdsRef.current.add(parsed.id);
+
+            const createdAtMs = Number.isFinite(Date.parse(parsed.createdAt))
+              ? Date.parse(parsed.createdAt)
+              : Number(parsed.candleTs || 0);
+
+            // Do not replay old alerts during initial hydration.
+            // But if WebSocket misses a freshly created alert after app start,
+            // poll should still notify quickly.
+            const shouldNotifyFromPoll =
+              initialPollSyncedRef.current &&
+              Number.isFinite(createdAtMs) &&
+              createdAtMs >= sessionStartedAtRef.current - 2000;
+
+            if (shouldNotifyFromPoll) {
+              await notifyOnCriticalAlert(parsed, state.preferences);
+            }
           }
         }
+        initialPollSyncedRef.current = true;
       } catch (err) {
         const reason = err instanceof Error ? err.message : "alerts_poll_failed";
         dispatch({ type: "STREAM_POLL_FAILURE", error: reason });
@@ -167,7 +186,7 @@ export function useAlertStream(enabled = true) {
     };
 
     upsertFromServer();
-    pollTimerRef.current = setInterval(upsertFromServer, 15_000);
+    pollTimerRef.current = setInterval(upsertFromServer, 5_000);
     connect();
 
     return () => {

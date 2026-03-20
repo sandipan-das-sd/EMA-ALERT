@@ -12,14 +12,27 @@ export async function sendExpoPushNotification(pushToken, message) {
     return { success: false, skipped: true, reason: 'Missing push token' };
   }
 
+  const normalizedToken = String(pushToken).trim();
+  const isExpoToken =
+    normalizedToken.startsWith('ExponentPushToken[') ||
+    normalizedToken.startsWith('ExpoPushToken[');
+
+  if (!isExpoToken) {
+    return { success: false, skipped: true, reason: 'Invalid Expo push token format' };
+  }
+
   const payload = {
-    to: pushToken,
+    to: normalizedToken,
     sound: 'default',
     title: message.title || 'EMA Alert',
     body: message.body || 'New alert received',
     data: message.data || {},
     badge: 1,
     priority: 'high',
+    channelId: 'alerts',
+    ttl: 300,
+    expiration: Math.floor(Date.now() / 1000) + 300,
+    subtitle: 'EMA-ALERT',
   };
 
   try {
@@ -40,7 +53,7 @@ export async function sendExpoPushNotification(pushToken, message) {
           return {
             success: true,
             ticket: ticket.id,
-            message: `Push sent to ${pushToken.substring(0, 20)}...`,
+            message: `Push sent to ${normalizedToken.substring(0, 24)}...`,
           };
         }
 
@@ -84,6 +97,7 @@ export async function sendPushAlertToUser(user, alertData, preferences) {
       instrumentKey: alertData.instrumentKey || '',
       strategy: alertData.strategy || 'ema20_cross_up',
       timestamp: new Date().toISOString(),
+      type: 'ema_alert',
     },
   };
 
