@@ -41,6 +41,8 @@ function getTransporter() {
 }
 
 function buildAlertEmailHtml(alertData) {
+  const displaySymbol = getReadableSymbol(alertData);
+  const keyText = String(alertData.instrumentKey || '').trim();
   const price = Number.isFinite(alertData.close) ? alertData.close.toFixed(2) : 'NA';
   const ema = Number.isFinite(alertData.ema) ? alertData.ema.toFixed(2) : 'NA';
   const time = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -55,8 +57,8 @@ function buildAlertEmailHtml(alertData) {
       <h2 style="margin:0 0 8px;">EMA Alert Triggered</h2>
       <p style="margin:0 0 12px;">Your configured strategy has triggered an alert.</p>
       <table cellpadding="6" cellspacing="0" border="1" style="border-collapse: collapse; border-color: #ddd;">
-        <tr><td><strong>Instrument</strong></td><td>${alertData.instrumentName || 'Unknown'}</td></tr>
-        <tr><td><strong>Symbol Key</strong></td><td>${alertData.instrumentKey || 'NA'}</td></tr>
+        <tr><td><strong>Symbol</strong></td><td>${displaySymbol}</td></tr>
+        <tr><td><strong>Exchange Key</strong></td><td>${keyText || 'NA'}</td></tr>
         <tr><td><strong>Strategy</strong></td><td>${alertData.strategy || 'ema20_cross_up'}</td></tr>
         <tr><td><strong>Price</strong></td><td>${price}</td></tr>
         <tr><td><strong>EMA</strong></td><td>${ema}</td></tr>
@@ -65,6 +67,25 @@ function buildAlertEmailHtml(alertData) {
       <p style="margin-top: 12px; color: #666; font-size: 12px;">EMA Alert System</p>
     </div>
   `;
+}
+
+function humanizeInstrumentKey(instrumentKey) {
+  const raw = String(instrumentKey || '').trim();
+  if (!raw) return '';
+
+  const parts = raw.split('|');
+  if (parts.length >= 2) {
+    return parts.slice(1).join(' | ').replace(/_/g, ' ').trim();
+  }
+
+  return raw.replace(/_/g, ' ').replace(/\|/g, ' ').trim();
+}
+
+function getReadableSymbol(alertData) {
+  const instrumentName = String(alertData?.instrumentName || '').trim();
+  if (instrumentName) return instrumentName;
+  const fromKey = humanizeInstrumentKey(alertData?.instrumentKey);
+  return fromKey || 'Unknown';
 }
 
 export async function sendAlertEmailToUser(user, alertData, preferences) {
@@ -85,8 +106,9 @@ export async function sendAlertEmailToUser(user, alertData, preferences) {
   const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER || process.env.SMTP_MAIL;
   const fromName = String(process.env.SMTP_FROM_NAME || '').trim();
   const from = fromName ? `${fromName} <${fromEmail}>` : fromEmail;
-  const subject = `${alertData.instrumentName || 'Instrument'} Alert`;
-  const text = `EMA Alert Triggered\nInstrument: ${alertData.instrumentName || 'Unknown'}\nKey: ${alertData.instrumentKey || 'NA'}\nStrategy: ${alertData.strategy || 'ema20_cross_up'}\nPrice: ${Number.isFinite(alertData.close) ? alertData.close.toFixed(2) : 'NA'}\nEMA: ${Number.isFinite(alertData.ema) ? alertData.ema.toFixed(2) : 'NA'}`;
+  const readableSymbol = getReadableSymbol(alertData);
+  const subject = `${readableSymbol} Alert`;
+  const text = `EMA Alert Triggered\nSymbol: ${readableSymbol}\nExchange Key: ${alertData.instrumentKey || 'NA'}\nStrategy: ${alertData.strategy || 'ema20_cross_up'}\nPrice: ${Number.isFinite(alertData.close) ? alertData.close.toFixed(2) : 'NA'}\nEMA: ${Number.isFinite(alertData.ema) ? alertData.ema.toFixed(2) : 'NA'}`;
 
   try {
     const info = await transport.sendMail({
