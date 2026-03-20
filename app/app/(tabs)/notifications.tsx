@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -7,8 +7,28 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { dismissAlertById, dismissAllAlerts } from "@/lib/api";
+import { dismissAlertById, dismissAllAlerts, getWatchlist, type WatchlistItem } from "@/lib/api";
 import { showToast } from "@/lib/toast";
+
+function keyVariants(key: string): string[] {
+  const out = [key];
+  if (key.includes("|")) out.push(key.replace("|", ":"));
+  if (key.includes(":")) out.push(key.replace(":", "|"));
+  return out;
+}
+
+function prettifyKey(key: string) {
+  if (!key) return key;
+  const parts = key.split(/[|:]/);
+  if (parts.length >= 2) {
+    const tail = parts[parts.length - 1];
+    if (/^\d+$/.test(tail)) {
+      return key;
+    }
+    return tail.replace(/_/g, " ");
+  }
+  return key.replace(/_/g, " ");
+}
 
 export default function NotificationsScreen() {
   const colorScheme = useColorScheme() ?? "light";
@@ -17,8 +37,46 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
 
   const items = useMemo(() => state.alerts.filter((a) => a.status !== "dismissed").slice(0, 100), [state.alerts]);
+
+  const watchlistNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of watchlist) {
+      const label = item.tradingSymbol || item.name || "";
+      if (!label) continue;
+      for (const variant of keyVariants(String(item.key || ""))) {
+        map.set(variant, label);
+      }
+    }
+    return map;
+  }, [watchlist]);
+
+  const getReadableName = (instrumentKey: string, currentName: string) => {
+    const mapped = watchlistNameMap.get(instrumentKey);
+    if (mapped) return mapped;
+
+    if (currentName && currentName !== instrumentKey) return currentName;
+
+    return prettifyKey(instrumentKey);
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const items = await getWatchlist();
+        if (mounted) setWatchlist(items || []);
+      } catch {
+        // Keep UI functional even if watchlist name lookup fails.
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function handleDeleteOne(alertId: string) {
     setBusyId(alertId);
@@ -85,7 +143,7 @@ export default function NotificationsScreen() {
               key={a.id}
               style={[styles.alertCard, { backgroundColor: palette.card, borderColor: palette.border }]}> 
               <View style={styles.alertTop}>
-                <ThemedText type="defaultSemiBold">{a.instrumentName}</ThemedText>
+                <ThemedText type="defaultSemiBold">{getReadableName(a.instrumentKey, a.instrumentName)}</ThemedText>
                 <ThemedText style={{ color: palette.muted }}>
                   {new Date(a.createdAt).toLocaleTimeString()}
                 </ThemedText>
