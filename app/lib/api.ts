@@ -281,6 +281,12 @@ export async function registerPushToken(pushToken: string) {
   });
 }
 
+export async function sendPushTest() {
+  return request('/auth/push-test', {
+    method: 'POST',
+  });
+}
+
 export async function dismissAlertById(alertId: string) {
   return request(`/alerts/${encodeURIComponent(alertId)}/dismiss`, {
     method: 'PATCH',

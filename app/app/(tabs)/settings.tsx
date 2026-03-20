@@ -8,7 +8,7 @@ import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { registerPushToken } from "@/lib/api";
+import { registerPushToken, sendPushTest } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { requestPushPermissions } from "@/services/push-notification-service";
 
@@ -62,6 +62,7 @@ export default function SettingsScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
+  const [pushTestLoading, setPushTestLoading] = useState(false);
 
   async function handleTokenUpdate() {
     if (!upstoxToken.trim()) return;
@@ -122,6 +123,18 @@ export default function SettingsScreen() {
       showToast(e instanceof Error ? e.message : "Failed to enable notifications.");
     } finally {
       setPushLoading(false);
+    }
+  }
+
+  async function handleSendPushTest() {
+    setPushTestLoading(true);
+    try {
+      const data = await sendPushTest();
+      showToast(data?.message || "Test push sent");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Test push failed");
+    } finally {
+      setPushTestLoading(false);
     }
   }
 
@@ -205,6 +218,14 @@ export default function SettingsScreen() {
           style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.background, marginTop: 6 }]}>
           <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
             {pushLoading ? "Requesting..." : "Allow Notifications"}
+          </ThemedText>
+        </Pressable>
+        <Pressable
+          onPress={handleSendPushTest}
+          disabled={pushTestLoading}
+          style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.background, marginTop: 6 }]}>
+          <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
+            {pushTestLoading ? "Sending..." : "Send Test Push"}
           </ThemedText>
         </Pressable>
       </ThemedView>

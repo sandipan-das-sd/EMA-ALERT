@@ -1,6 +1,7 @@
 import express from 'express';
 import User from '../models/User.js';
 import { signToken } from '../utils/jwt.js';
+import { sendExpoPushNotification } from '../services/pushNotification.js';
 
 const router = express.Router();
 
@@ -210,6 +211,39 @@ router.post('/push-token', async (req, res) => {
   } catch (e) {
     console.error('[Push Token] Error:', e);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/push-test', async (req, res) => {
+  try {
+    const token = getRequestToken(req);
+    if (!token) return res.status(401).json({ message: 'Not authenticated' });
+
+    const { verifyToken } = await import('../utils/jwt.js');
+    const decoded = verifyToken(token);
+    if (!decoded) return res.status(401).json({ message: 'Invalid token' });
+
+    const user = await User.findById(decoded.id).select('email pushToken');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.pushToken) return res.status(400).json({ message: 'No push token registered for this user' });
+
+    const result = await sendExpoPushNotification(user.pushToken, {
+      title: 'EMA Push Test',
+      body: 'Test push delivered from server',
+      data: {
+        type: 'push_test',
+        ts: new Date().toISOString(),
+      },
+    });
+
+    if (result.success) {
+      return res.json({ message: 'Test push sent', result });
+    }
+
+    return res.status(400).json({ message: 'Test push failed', result });
+  } catch (e) {
+    console.error('[Push Test] Error:', e);
+    res.status(500).json({ message: 'Server error', error: e.message });
   }
 });
 
