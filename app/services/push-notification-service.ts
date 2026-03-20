@@ -14,6 +14,7 @@ export type PushTokenResult = {
     | 'not_physical_device'
     | 'permission_denied'
     | 'missing_project_id'
+    | 'fcm_not_configured'
     | 'token_fetch_error';
   detail?: string;
 };
@@ -108,10 +109,23 @@ export async function requestPushPermissions(): Promise<PushTokenResult> {
     return { token: token.data, reason: 'ok' };
   } catch (error) {
     console.error('[Push] Error requesting permissions:', error);
+    const detail = error instanceof Error ? error.message : String(error);
+    const isFirebaseNotInitialized =
+      /Default FirebaseApp is not initialized/i.test(detail) ||
+      /firebaseapp\.initializeapp/i.test(detail);
+
+    if (isFirebaseNotInitialized) {
+      return {
+        token: null,
+        reason: 'fcm_not_configured',
+        detail,
+      };
+    }
+
     return {
       token: null,
       reason: 'token_fetch_error',
-      detail: error instanceof Error ? error.message : String(error),
+      detail,
     };
   }
 }

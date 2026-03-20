@@ -1,0 +1,85 @@
+{
+  "project_info": {
+    "project_number": "674494800063",
+    "firebase_url": "https://gyanoda-ec9dc-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "gyanoda-ec9dc",
+    "storage_bucket": "gyanoda-ec9dc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674494800063:android:00992783b5d6044682a60a",
+        "android_client_info": {
+          "package_name": "com.gyanoda_studybloom24.emaalertsystem"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "674494800063-vao2l8ij5mtj0dditpgenjvlufvqjrvj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7F0hIuF1VSAiTUp3Lqi1AgST1h0cYidI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "674494800063-vao2l8ij5mtj0dditpgenjvlufvqjrvj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674494800063:android:57c7d8f800af13ed82a60a",
+        "android_client_info": {
+          "package_name": "com.gyanodapyq.studybloom24"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "674494800063-0v4j9tq1luub1sb0aumlfkorhdr5l3g3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gyanodapyq.studybloom24",
+            "certificate_hash": "5a0e7ead0fc7e5f3c36ee2412ed6e3e26d6df050"
+          }
+        },
+        {
+          "client_id": "674494800063-pqt223t2splaproncujr2ilevjr8cmov.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gyanodapyq.studybloom24",
+            "certificate_hash": "66c7f4eb0cf15345b1b06c5e503b9e79ce6eda24"
+          }
+        },
+        {
+          "client_id": "674494800063-vao2l8ij5mtj0dditpgenjvlufvqjrvj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7F0hIuF1VSAiTUp3Lqi1AgST1h0cYidI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "674494800063-vao2l8ij5mtj0dditpgenjvlufvqjrvj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

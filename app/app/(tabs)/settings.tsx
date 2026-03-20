@@ -107,6 +107,11 @@ export default function SettingsScreen() {
           return;
         }
 
+        if (result.reason === "fcm_not_configured") {
+          showToast("FCM not configured in Android build. Add google-services.json and rebuild APK.");
+          return;
+        }
+
         showToast(`Push token failed: ${result.detail || result.reason}`);
         return;
       }
