@@ -21,6 +21,14 @@ export interface StreamStatus {
   lastHeartbeatAt: string | null;
   lastMessageAt: string | null;
   lastError: string | null;
+  lastAlertsPollAt: string | null;
+  lastAlertsPollError: string | null;
+  pushRegistration: {
+    status: "idle" | "registering" | "registered" | "failed" | "expo_go";
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    error: string | null;
+  };
 }
 
 export interface AlertPreferences {
@@ -48,6 +56,15 @@ export type AlertAction =
   | { type: "STREAM_MESSAGE" }
   | { type: "STREAM_HEARTBEAT" }
   | { type: "STREAM_RECONNECT_ATTEMPT"; attempt: number }
+  | { type: "STREAM_POLL_SUCCESS" }
+  | { type: "STREAM_POLL_FAILURE"; error: string }
+  | {
+      type: "PUSH_REGISTRATION_STATUS";
+      payload: {
+        status: "idle" | "registering" | "registered" | "failed" | "expo_go";
+        error?: string | null;
+      };
+    }
   | { type: "UPSERT_ALERT"; payload: EmaAlert }
   | { type: "MARK_ALL_READ" }
   | { type: "SET_PREFERENCES"; payload: Partial<AlertPreferences> }

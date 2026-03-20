@@ -10,6 +10,22 @@ import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { showToast } from "@/lib/toast";
 
+function formatIso(iso: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.debugRow}>
+      <ThemedText style={styles.debugLabel}>{label}</ThemedText>
+      <ThemedText style={styles.debugValue}>{value}</ThemedText>
+    </View>
+  );
+}
+
 function ToggleRow({
   label,
   hint,
@@ -135,6 +151,19 @@ export default function SettingsScreen() {
         </Pressable>
       </ThemedView>
 
+      <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+        <ThemedText type="defaultSemiBold">Debug Push Status</ThemedText>
+        <DebugRow label="Stream" value={state.stream.connected ? "Connected" : "Disconnected"} />
+        <DebugRow label="Reconnect Attempt" value={String(state.stream.reconnectAttempt)} />
+        <DebugRow label="Last Stream Msg" value={formatIso(state.stream.lastMessageAt)} />
+        <DebugRow label="Last Poll" value={formatIso(state.stream.lastAlertsPollAt)} />
+        <DebugRow label="Poll Error" value={state.stream.lastAlertsPollError || "None"} />
+        <DebugRow label="Push Status" value={state.stream.pushRegistration.status} />
+        <DebugRow label="Push Last Attempt" value={formatIso(state.stream.pushRegistration.lastAttemptAt)} />
+        <DebugRow label="Push Last Success" value={formatIso(state.stream.pushRegistration.lastSuccessAt)} />
+        <DebugRow label="Push Error" value={state.stream.pushRegistration.error || "None"} />
+      </ThemedView>
+
       <Pressable onPress={handleLogout} style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.card }]}> 
         <ThemedText style={{ color: palette.text, fontWeight: "700" }}>Log Out</ThemedText>
       </Pressable>
@@ -160,6 +189,22 @@ const styles = StyleSheet.create({
   },
   toggleLeft: { flex: 1, gap: 2 },
   hintText: { opacity: 0.7, fontSize: 12, lineHeight: 18 },
+  debugRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+  debugLabel: {
+    opacity: 0.75,
+    fontSize: 12,
+  },
+  debugValue: {
+    fontSize: 12,
+    fontWeight: "700",
+    maxWidth: "58%",
+    textAlign: "right",
+  },
   input: {
     borderWidth: 1,
     borderRadius: 12,

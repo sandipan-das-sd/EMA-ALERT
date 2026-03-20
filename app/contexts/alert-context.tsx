@@ -15,6 +15,14 @@ const initialState: AlertState = {
     lastHeartbeatAt: null,
     lastMessageAt: null,
     lastError: null,
+    lastAlertsPollAt: null,
+    lastAlertsPollError: null,
+    pushRegistration: {
+      status: "idle",
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      error: null,
+    },
   },
   preferences: {
     vibrationEnabled: true,
@@ -96,6 +104,47 @@ function reducer(state: AlertState, action: AlertAction): AlertState {
           reconnectAttempt: action.attempt,
         },
       };
+
+    case "STREAM_POLL_SUCCESS":
+      return {
+        ...state,
+        stream: {
+          ...state.stream,
+          lastAlertsPollAt: new Date().toISOString(),
+          lastAlertsPollError: null,
+        },
+      };
+
+    case "STREAM_POLL_FAILURE":
+      return {
+        ...state,
+        stream: {
+          ...state.stream,
+          lastAlertsPollAt: new Date().toISOString(),
+          lastAlertsPollError: action.error || "alerts_poll_failed",
+        },
+      };
+
+    case "PUSH_REGISTRATION_STATUS": {
+      const nowIso = new Date().toISOString();
+      const nextStatus = action.payload.status;
+      return {
+        ...state,
+        stream: {
+          ...state.stream,
+          pushRegistration: {
+            ...state.stream.pushRegistration,
+            status: nextStatus,
+            lastAttemptAt: nowIso,
+            lastSuccessAt:
+              nextStatus === "registered"
+                ? nowIso
+                : state.stream.pushRegistration.lastSuccessAt,
+            error: action.payload.error || null,
+          },
+        },
+      };
+    }
 
     case "UPSERT_ALERT": {
       const exists = state.alerts.some((a) => a.id === action.payload.id);

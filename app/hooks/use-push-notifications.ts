@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import Constants from 'expo-constants';
 import { requestPushPermissions, configureNotifications } from '../services/push-notification-service';
 import { APP_CONFIG } from '@/lib/config';
+import { useAlertContext } from '@/contexts/alert-context';
 
 const API_BASE = APP_CONFIG.apiBase;
 const PUSH_TOKEN_ENDPOINT = `${API_BASE.replace(/\/$/, '')}/auth/push-token`;
@@ -20,6 +21,7 @@ function isExpoGoClient() {
  * Hook to manage push notification setup and token registration
  */
 export function usePushNotifications(enabled = true) {
+  const { dispatch } = useAlertContext();
   const notificationListener = useRef<NotificationSubscription | null>(null);
   const responseListener = useRef<NotificationSubscription | null>(null);
   const registeredRef = useRef(false);
@@ -27,11 +29,13 @@ export function usePushNotifications(enabled = true) {
 
   useEffect(() => {
     if (!enabled) {
+      dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'idle', error: null } });
       return;
     }
 
     if (isExpoGoClient()) {
       console.log('[Push Hook] Expo Go detected. Skipping remote push setup.');
+      dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'expo_go', error: 'Expo Go does not support remote push in SDK 53+' } });
       return;
     }
 
@@ -40,6 +44,7 @@ export function usePushNotifications(enabled = true) {
 
     // Register for push notifications
     const setupPush = async () => {
+      dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'registering', error: null } });
       try {
         const token = await requestPushPermissions();
         
@@ -58,18 +63,31 @@ export function usePushNotifications(enabled = true) {
             if (response.ok) {
               const data = await response.json();
               console.log('[Push Hook] ✓ Token registered:', data.message);
+              dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'registered', error: null } });
             } else {
               const text = await response.text();
               console.error('[Push Hook] Failed to register token:', response.status, text || 'no response body');
               registeredRef.current = false;
+              dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'failed', error: `HTTP ${response.status}` } });
             }
           } catch (err) {
             console.error('[Push Hook] Error registering token:', err);
             registeredRef.current = false;
+            dispatch({
+              type: 'PUSH_REGISTRATION_STATUS',
+              payload: { status: 'failed', error: err instanceof Error ? err.message : 'push_registration_failed' },
+            });
           }
+        } else if (!token) {
+          registeredRef.current = false;
+          dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'failed', error: 'token_not_available' } });
         }
       } catch (err) {
         console.error('[Push Hook] Setup failed:', err);
+        dispatch({
+          type: 'PUSH_REGISTRATION_STATUS',
+          payload: { status: 'failed', error: err instanceof Error ? err.message : 'push_setup_failed' },
+        });
       } finally {
         if (!registeredRef.current) {
           // Retry registration periodically to survive transient auth/network races.
@@ -111,5 +129,5 @@ export function usePushNotifications(enabled = true) {
         clearTimeout(retryTimerRef.current);
       }
     };
-  }, [enabled]);
+  }, [enabled, dispatch]);
 }

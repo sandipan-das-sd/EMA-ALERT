@@ -54,6 +54,7 @@ export function useAlertStream(enabled = true) {
     const upsertFromServer = async () => {
       try {
         const rows = await getAlerts({ status: "active", limit: 100 });
+        dispatch({ type: "STREAM_POLL_SUCCESS" });
         for (const row of rows) {
           const parsed = toAlertPayload({
             userId: row.userId,
@@ -79,6 +80,8 @@ export function useAlertStream(enabled = true) {
           }
         }
       } catch (err) {
+        const reason = err instanceof Error ? err.message : "alerts_poll_failed";
+        dispatch({ type: "STREAM_POLL_FAILURE", error: reason });
         if (process.env.NODE_ENV !== "production") {
           console.warn("[App] Alerts poll failed", err);
         }
