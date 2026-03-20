@@ -53,6 +53,25 @@ function StatCard({ label, value, hint }) {
   );
 }
 
+function humanizeInstrumentKey(key) {
+  const raw = String(key || '').trim();
+  if (!raw) return '';
+  const parts = raw.split('|');
+  if (parts.length >= 2) {
+    return parts.slice(1).join(' | ').replace(/_/g, ' ').trim();
+  }
+  return raw.replace(/_/g, ' ').replace(/\|/g, ' ').trim();
+}
+
+function readableInstrumentName(input = {}) {
+  const tradingSymbol = String(input.tradingSymbol || '').trim();
+  if (tradingSymbol) return tradingSymbol;
+  const name = String(input.name || '').trim();
+  if (name) return name;
+  const fromKey = humanizeInstrumentKey(input.instrumentKey || input.key);
+  return fromKey || '-';
+}
+
 function App() {
   const ws = useWsContext();
   const [email, setEmail] = useState('');
@@ -561,6 +580,7 @@ function App() {
                 <tr>
                   <th>User</th>
                   <th>Instrument</th>
+                  <th>Key</th>
                   <th>Strategy</th>
                   <th>Status</th>
                   <th>Time</th>
@@ -574,7 +594,8 @@ function App() {
                       <div className="cell-title">{a.userName}</div>
                       <div className="cell-sub">{a.userEmail}</div>
                     </td>
-                    <td>{a.tradingSymbol || a.instrumentKey}</td>
+                    <td>{readableInstrumentName(a)}</td>
+                    <td className="cell-sub">{a.instrumentKey || '-'}</td>
                     <td>{a.strategy}</td>
                     <td>{a.status}</td>
                     <td>{new Date(a.createdAt).toLocaleString()}</td>
@@ -604,7 +625,8 @@ function App() {
             <table>
               <thead>
                 <tr>
-                  <th>Instrument Key</th>
+                  <th>Instrument</th>
+                  <th>Key</th>
                   <th>LTP</th>
                   <th>Change %</th>
                   <th>Timestamp</th>
@@ -613,7 +635,8 @@ function App() {
               <tbody>
                 {(market?.sampleQuotes || []).map((q) => (
                   <tr key={q.key}>
-                    <td>{q.key}</td>
+                    <td>{readableInstrumentName(q)}</td>
+                    <td className="cell-sub">{q.key || '-'}</td>
                     <td>{typeof q.ltp === 'number' ? q.ltp.toFixed(2) : '-'}</td>
                     <td>{typeof q.changePct === 'number' ? `${q.changePct.toFixed(2)}%` : '-'}</td>
                     <td>{q.ts ? new Date(q.ts).toLocaleString() : '-'}</td>
