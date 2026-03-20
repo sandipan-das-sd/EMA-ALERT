@@ -274,6 +274,13 @@ export async function getAlerts(params: { status?: "active" | "dismissed"; since
   return (data?.alerts || []) as ServerAlertItem[];
 }
 
+export async function registerPushToken(pushToken: string) {
+  return request('/auth/push-token', {
+    method: 'POST',
+    body: { pushToken },
+  });
+}
+
 export async function searchInstruments(query: string, options: { segments?: string[]; limit?: number } = {}) {
   const params = new URLSearchParams();
   params.set("q", query);

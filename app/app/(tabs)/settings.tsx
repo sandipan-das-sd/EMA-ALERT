@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
+import { Linking, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -8,7 +8,9 @@ import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { registerPushToken } from "@/lib/api";
 import { showToast } from "@/lib/toast";
+import { requestPushPermissions } from "@/services/push-notification-service";
 
 function formatIso(iso: string | null) {
   if (!iso) return "-";
@@ -59,6 +61,7 @@ export default function SettingsScreen() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
 
   async function handleTokenUpdate() {
     if (!upstoxToken.trim()) return;
@@ -85,6 +88,35 @@ export default function SettingsScreen() {
       showToast("Logged out successfully.");
     } catch {
       showToast("Logout failed. Please try again.");
+    }
+  }
+
+  async function handleEnableNotifications() {
+    setPushLoading(true);
+    try {
+      const result = await requestPushPermissions();
+      if (!result.token) {
+        if (result.reason === "permission_denied") {
+          showToast("Notification permission denied. Open app settings and allow notifications.");
+          await Linking.openSettings();
+          return;
+        }
+
+        if (result.reason === "expo_go") {
+          showToast("Use APK/dev build. Expo Go does not support remote push here.");
+          return;
+        }
+
+        showToast(`Push token failed: ${result.detail || result.reason}`);
+        return;
+      }
+
+      await registerPushToken(result.token);
+      showToast("Notifications enabled successfully.");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to enable notifications.");
+    } finally {
+      setPushLoading(false);
     }
   }
 
@@ -162,6 +194,14 @@ export default function SettingsScreen() {
         <DebugRow label="Push Last Attempt" value={formatIso(state.stream.pushRegistration.lastAttemptAt)} />
         <DebugRow label="Push Last Success" value={formatIso(state.stream.pushRegistration.lastSuccessAt)} />
         <DebugRow label="Push Error" value={state.stream.pushRegistration.error || "None"} />
+        <Pressable
+          onPress={handleEnableNotifications}
+          disabled={pushLoading}
+          style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.background, marginTop: 6 }]}>
+          <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
+            {pushLoading ? "Requesting..." : "Allow Notifications"}
+          </ThemedText>
+        </Pressable>
       </ThemedView>
 
       <Pressable onPress={handleLogout} style={[styles.secondaryBtn, { borderColor: palette.border, backgroundColor: palette.card }]}> 
