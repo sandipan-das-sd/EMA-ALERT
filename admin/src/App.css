@@ -73,7 +73,8 @@ h3 {
 
 button,
 input,
-textarea {
+textarea,
+select {
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.34);
   background: rgba(15, 23, 42, 0.75);
@@ -190,6 +191,28 @@ button:hover {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+}
+
+.bulk-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.select-all {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: #9bb2d6;
+  font-size: 13px;
+}
+
+input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: #38bdf8;
 }
 
 .table-wrap {

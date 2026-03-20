@@ -9,6 +9,20 @@ const router = express.Router();
 
 router.use(protect, requireAdmin);
 
+function csvEscape(value) {
+  const raw = value === null || value === undefined ? '' : String(value);
+  if (/[",\n]/.test(raw)) {
+    return `"${raw.replace(/"/g, '""')}"`;
+  }
+  return raw;
+}
+
+function toCsv(headers, rows) {
+  const head = headers.join(',');
+  const body = rows.map((row) => headers.map((h) => csvEscape(row[h])).join(',')).join('\n');
+  return `${head}\n${body}`;
+}
+
 router.get('/me', (req, res) => {
   const u = req.adminUser;
   res.json({
@@ -56,6 +70,48 @@ router.get('/overview', async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ message: 'Failed to load admin overview', error: e.message });
+  }
+});
+
+router.post('/users', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
+    const role = ['admin', 'user'].includes(String(req.body.role || '').trim()) ? String(req.body.role).trim() : 'user';
+    const phone = String(req.body.phone || '').trim();
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'name, email and password are required' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ message: 'password must be at least 8 characters' });
+    }
+
+    const exists = await User.findOne({ email });
+    if (exists) return res.status(409).json({ message: 'Email already in use' });
+
+    const created = await User.create({
+      name,
+      email,
+      password,
+      role,
+      phone,
+      isActive: true,
+    });
+
+    return res.status(201).json({
+      message: 'User created successfully',
+      user: {
+        id: created._id,
+        name: created.name,
+        email: created.email,
+        role: created.role,
+        isActive: created.isActive,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to create user', error: e.message });
   }
 });
 
@@ -132,6 +188,73 @@ router.patch('/users/:id/status', async (req, res) => {
     res.json({ message: `User ${isActive ? 'activated' : 'deactivated'} successfully`, user: { id: user._id, isActive: user.isActive } });
   } catch (e) {
     res.status(500).json({ message: 'Failed to update user status', error: e.message });
+  }
+});
+
+router.patch('/users/bulk-status', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.userIds) ? req.body.userIds.map((x) => String(x).trim()).filter(Boolean) : [];
+    const { isActive } = req.body;
+    if (!ids.length) return res.status(400).json({ message: 'userIds array is required' });
+    if (typeof isActive !== 'boolean') return res.status(400).json({ message: 'isActive boolean is required' });
+
+    if (!isActive && ids.includes(String(req.adminUser._id))) {
+      return res.status(400).json({ message: 'You cannot deactivate your own admin account' });
+    }
+
+    const result = await User.updateMany(
+      { _id: { $in: ids } },
+      { $set: { isActive } }
+    );
+
+    return res.json({
+      message: `Bulk status update complete (${isActive ? 'activated' : 'deactivated'})`,
+      matched: result.matchedCount || 0,
+      modified: result.modifiedCount || 0,
+    });
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to bulk update status', error: e.message });
+  }
+});
+
+router.post('/users/bulk-tokens', async (req, res) => {
+  try {
+    const pairs = Array.isArray(req.body.pairs) ? req.body.pairs : [];
+    if (!pairs.length) {
+      return res.status(400).json({ message: 'pairs array is required' });
+    }
+
+    const report = [];
+    let updated = 0;
+    for (const entry of pairs) {
+      const email = String(entry?.email || '').trim().toLowerCase();
+      const upstoxAccessToken = String(entry?.token || entry?.upstoxAccessToken || '').trim();
+
+      if (!email) {
+        report.push({ email: '', ok: false, message: 'Missing email' });
+        continue;
+      }
+
+      const user = await User.findOne({ email }).select('+upstoxAccessToken email');
+      if (!user) {
+        report.push({ email, ok: false, message: 'User not found' });
+        continue;
+      }
+
+      user.upstoxAccessToken = upstoxAccessToken;
+      await user.save();
+      updated += 1;
+      report.push({ email, ok: true, message: upstoxAccessToken ? 'Token updated' : 'Token cleared' });
+    }
+
+    return res.json({
+      message: 'Bulk token update processed',
+      total: pairs.length,
+      updated,
+      report,
+    });
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to bulk update tokens', error: e.message });
   }
 });
 
@@ -299,6 +422,75 @@ router.get('/market', (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ message: 'Failed to load market details', error: e.message });
+  }
+});
+
+router.get('/export/users.csv', async (req, res) => {
+  try {
+    const users = await User.find({})
+      .select('+upstoxAccessToken name email phone role isActive watchlist notes createdAt lastLoginAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const rows = users.map((u) => ({
+      id: u._id,
+      name: u.name,
+      email: u.email,
+      phone: u.phone || '',
+      role: u.role || 'user',
+      isActive: u.isActive !== false,
+      hasUpstoxToken: Boolean(u.upstoxAccessToken),
+      watchlistCount: Array.isArray(u.watchlist) ? u.watchlist.length : 0,
+      notesCount: Array.isArray(u.notes) ? u.notes.length : 0,
+      createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : '',
+      lastLoginAt: u.lastLoginAt ? new Date(u.lastLoginAt).toISOString() : '',
+    }));
+
+    const csv = toCsv(
+      ['id', 'name', 'email', 'phone', 'role', 'isActive', 'hasUpstoxToken', 'watchlistCount', 'notesCount', 'createdAt', 'lastLoginAt'],
+      rows
+    );
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="admin-users.csv"');
+    return res.send(csv);
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to export users CSV', error: e.message });
+  }
+});
+
+router.get('/export/alerts.csv', async (req, res) => {
+  try {
+    const alerts = await Alert.find({})
+      .sort({ createdAt: -1 })
+      .populate('userId', 'name email')
+      .lean();
+
+    const rows = alerts.map((a) => ({
+      id: a._id,
+      userId: a.userId?._id || a.userId || '',
+      userName: a.userId?.name || '',
+      userEmail: a.userId?.email || '',
+      instrumentKey: a.instrumentKey || '',
+      tradingSymbol: a.tradingSymbol || '',
+      timeframe: a.timeframe || '',
+      strategy: a.strategy || '',
+      status: a.status || '',
+      close: a.candle?.close ?? '',
+      ema: a.ema ?? '',
+      createdAt: a.createdAt ? new Date(a.createdAt).toISOString() : '',
+    }));
+
+    const csv = toCsv(
+      ['id', 'userId', 'userName', 'userEmail', 'instrumentKey', 'tradingSymbol', 'timeframe', 'strategy', 'status', 'close', 'ema', 'createdAt'],
+      rows
+    );
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="admin-alerts.csv"');
+    return res.send(csv);
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to export alerts CSV', error: e.message });
   }
 });
 

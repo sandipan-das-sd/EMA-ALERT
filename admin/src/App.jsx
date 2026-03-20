@@ -18,6 +18,26 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function downloadCsv(path, filename) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new Error(`Export failed: ${response.status}`);
+  }
+  const text = await response.text();
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function StatCard({ label, value, hint }) {
   return (
     <article className="stat-card">
@@ -47,6 +67,14 @@ function App() {
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedNotes, setSelectedNotes] = useState([]);
   const [watchlistDraft, setWatchlistDraft] = useState('');
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [bulkTokenCsv, setBulkTokenCsv] = useState('');
+
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserRole, setNewUserRole] = useState('admin');
 
   const banner = useMemo(() => {
     if (!error) return null;
@@ -62,6 +90,7 @@ function App() {
     const data = await api(`/admin/users?search=${encodeURIComponent(search)}&limit=50`);
     setUsers(data.users || []);
     setUsersTotal(data.total || 0);
+    setSelectedUserIds((prev) => prev.filter((id) => (data.users || []).some((u) => String(u.id) === String(id))));
   }, [search]);
 
   const refreshAlerts = useCallback(async () => {
@@ -150,6 +179,21 @@ function App() {
     }
   };
 
+  const toggleSelectedUser = (id, checked) => {
+    setSelectedUserIds((prev) => {
+      if (checked) return Array.from(new Set([...prev, id]));
+      return prev.filter((x) => String(x) !== String(id));
+    });
+  };
+
+  const toggleSelectAllVisible = (checked) => {
+    if (!checked) {
+      setSelectedUserIds([]);
+      return;
+    }
+    setSelectedUserIds(users.map((u) => u.id));
+  };
+
   const toggleUserRole = async (u) => {
     try {
       await api(`/admin/users/${u.id}/role`, {
@@ -169,6 +213,87 @@ function App() {
     try {
       await api(`/admin/users/${u.id}/upstox-token`, { method: 'PUT', body: { upstoxAccessToken } });
       await refreshUsers();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const bulkUpdateStatus = async (isActive) => {
+    if (!selectedUserIds.length) {
+      setError('Select at least one user for bulk status update');
+      return;
+    }
+    try {
+      await api('/admin/users/bulk-status', {
+        method: 'PATCH',
+        body: { userIds: selectedUserIds, isActive },
+      });
+      await refreshUsers();
+      await refreshOverview();
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const bulkUpdateTokens = async () => {
+    const lines = bulkTokenCsv
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      setError('Paste CSV lines in format: email,token');
+      return;
+    }
+
+    const pairs = lines
+      .map((line) => {
+        const [left, ...rest] = line.split(',');
+        const emailValue = String(left || '').trim().toLowerCase();
+        const tokenValue = rest.join(',').trim();
+        if (!emailValue) return null;
+        return { email: emailValue, token: tokenValue };
+      })
+      .filter(Boolean);
+
+    if (!pairs.length) {
+      setError('No valid email,token lines found');
+      return;
+    }
+
+    try {
+      await api('/admin/users/bulk-tokens', {
+        method: 'POST',
+        body: { pairs },
+      });
+      await refreshUsers();
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const createUser = async (e) => {
+    e.preventDefault();
+    try {
+      await api('/admin/users', {
+        method: 'POST',
+        body: {
+          name: newUserName,
+          email: newUserEmail,
+          password: newUserPassword,
+          phone: newUserPhone,
+          role: newUserRole,
+        },
+      });
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserPhone('');
+      setNewUserRole('admin');
+      await refreshUsers();
+      await refreshOverview();
+      setError('');
     } catch (err) {
       setError(err.message);
     }
@@ -273,13 +398,29 @@ function App() {
                 placeholder="Search by name, email or phone"
               />
               <button className="ghost" onClick={refreshUsers}>Search</button>
+              <button className="ghost" onClick={() => downloadCsv('/admin/export/users.csv', 'admin-users.csv')}>Export Users CSV</button>
             </div>
+          </div>
+
+          <div className="bulk-toolbar">
+            <label className="select-all">
+              <input
+                type="checkbox"
+                checked={users.length > 0 && selectedUserIds.length === users.length}
+                onChange={(e) => toggleSelectAllVisible(e.target.checked)}
+              />
+              Select all visible
+            </label>
+            <button className="ok" onClick={() => bulkUpdateStatus(true)}>Bulk Activate</button>
+            <button className="warn" onClick={() => bulkUpdateStatus(false)}>Bulk Deactivate</button>
+            <span className="panel-foot">Selected: {selectedUserIds.length}</span>
           </div>
 
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th>Select</th>
                   <th>User</th>
                   <th>Role</th>
                   <th>Status</th>
@@ -292,6 +433,13 @@ function App() {
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedUserIds.includes(u.id)}
+                        onChange={(e) => toggleSelectedUser(u.id, e.target.checked)}
+                      />
+                    </td>
                     <td>
                       <div className="cell-title">{u.name}</div>
                       <div className="cell-sub">{u.email}</div>
@@ -315,6 +463,40 @@ function App() {
             </table>
           </div>
           <div className="panel-foot">Showing {users.length} of {usersTotal} users</div>
+
+          <div className="details-grid">
+            <article className="card">
+              <h3>Create User / Admin</h3>
+              <form className="login-form" onSubmit={createUser}>
+                <label>Name</label>
+                <input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} placeholder="Full name" />
+                <label>Email</label>
+                <input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} placeholder="name@example.com" />
+                <label>Password</label>
+                <input type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="Minimum 8 characters" />
+                <label>Phone</label>
+                <input value={newUserPhone} onChange={(e) => setNewUserPhone(e.target.value)} placeholder="Optional" />
+                <label>Role</label>
+                <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)}>
+                  <option value="admin">Admin</option>
+                  <option value="user">User</option>
+                </select>
+                <button className="ok" type="submit">Create User</button>
+              </form>
+            </article>
+
+            <article className="card">
+              <h3>Bulk Upstox Token Update (CSV)</h3>
+              <textarea
+                rows={10}
+                value={bulkTokenCsv}
+                onChange={(e) => setBulkTokenCsv(e.target.value)}
+                placeholder={'email,token\nuser1@mail.com,token1\nuser2@mail.com,token2'}
+              />
+              <div className="hint">Paste one email,token pair per line. Empty token clears token.</div>
+              <button className="ok" onClick={bulkUpdateTokens}>Run Bulk Token Update</button>
+            </article>
+          </div>
 
           {selectedUser && (
             <div className="details-grid">
@@ -352,7 +534,10 @@ function App() {
         <section className="panel">
           <div className="panel-head">
             <h2>Alert Logs</h2>
-            <button className="ghost" onClick={refreshAlerts}>Refresh Alerts</button>
+            <div className="actions">
+              <button className="ghost" onClick={refreshAlerts}>Refresh Alerts</button>
+              <button className="ghost" onClick={() => downloadCsv('/admin/export/alerts.csv', 'admin-alerts.csv')}>Export Alerts CSV</button>
+            </div>
           </div>
           <div className="table-wrap">
             <table>
