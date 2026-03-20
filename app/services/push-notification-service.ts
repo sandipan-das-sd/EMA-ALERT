@@ -6,6 +6,18 @@ async function loadNotifications() {
   return import('expo-notifications');
 }
 
+export type PushTokenResult = {
+  token: string | null;
+  reason:
+    | 'ok'
+    | 'expo_go'
+    | 'not_physical_device'
+    | 'permission_denied'
+    | 'missing_project_id'
+    | 'token_fetch_error';
+  detail?: string;
+};
+
 function isExpoGoClient() {
   return Constants.executionEnvironment === 'storeClient';
 }
@@ -51,17 +63,17 @@ export function configureNotifications() {
 /**
  * Request notification permissions and get push token
  */
-export async function requestPushPermissions(): Promise<string | null> {
+export async function requestPushPermissions(): Promise<PushTokenResult> {
   try {
     if (isExpoGoClient()) {
       console.log('[Push] Skipping remote push token in Expo Go. Use a development build.');
-      return null;
+      return { token: null, reason: 'expo_go' };
     }
 
     // Check if device is physical (not emulator/simulator)
     if (!Device.isDevice) {
       console.log('[Push] Not a physical device, skipping push token request');
-      return null;
+      return { token: null, reason: 'not_physical_device' };
     }
 
     const Notifications = await loadNotifications();
@@ -78,22 +90,29 @@ export async function requestPushPermissions(): Promise<string | null> {
 
     if (finalStatus !== 'granted') {
       console.log('[Push] Permission denied by user');
-      return null;
+      return { token: null, reason: 'permission_denied' };
     }
 
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ||
       Constants.easConfig?.projectId;
 
+    if (!projectId) {
+      console.warn('[Push] Missing EAS projectId for getExpoPushTokenAsync');
+      return { token: null, reason: 'missing_project_id' };
+    }
+
     // Get the push token
-    const token = projectId
-      ? await Notifications.getExpoPushTokenAsync({ projectId })
-      : await Notifications.getExpoPushTokenAsync();
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
     console.log(`[Push] ✓ Token acquired: ${token.data.substring(0, 20)}...`);
-    return token.data;
+    return { token: token.data, reason: 'ok' };
   } catch (error) {
     console.error('[Push] Error requesting permissions:', error);
-    return null;
+    return {
+      token: null,
+      reason: 'token_fetch_error',
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

@@ -46,9 +46,22 @@ export function usePushNotifications(enabled = true) {
     const setupPush = async () => {
       dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'registering', error: null } });
       try {
-        const token = await requestPushPermissions();
+        const tokenResult = await requestPushPermissions();
+        const token = tokenResult.token;
+
+        if (!token) {
+          registeredRef.current = false;
+          dispatch({
+            type: 'PUSH_REGISTRATION_STATUS',
+            payload: {
+              status: tokenResult.reason === 'expo_go' ? 'expo_go' : 'failed',
+              error: tokenResult.detail || tokenResult.reason,
+            },
+          });
+          return;
+        }
         
-        if (token && !registeredRef.current) {
+        if (!registeredRef.current) {
           registeredRef.current = true;
           console.log('[Push Hook] Registering token with backend...');
           
@@ -78,9 +91,6 @@ export function usePushNotifications(enabled = true) {
               payload: { status: 'failed', error: err instanceof Error ? err.message : 'push_registration_failed' },
             });
           }
-        } else if (!token) {
-          registeredRef.current = false;
-          dispatch({ type: 'PUSH_REGISTRATION_STATUS', payload: { status: 'failed', error: 'token_not_available' } });
         }
       } catch (err) {
         console.error('[Push Hook] Setup failed:', err);
