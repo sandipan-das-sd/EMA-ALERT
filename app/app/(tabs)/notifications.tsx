@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { ThemedText } from "@/components/themed-text";
@@ -7,14 +7,44 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { dismissAlertById, dismissAllAlerts } from "@/lib/api";
+import { showToast } from "@/lib/toast";
 
 export default function NotificationsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const { state, dispatch } = useAlertContext();
   const insets = useSafeAreaInsets();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
 
-  const items = useMemo(() => state.alerts.slice(0, 100), [state.alerts]);
+  const items = useMemo(() => state.alerts.filter((a) => a.status !== "dismissed").slice(0, 100), [state.alerts]);
+
+  async function handleDeleteOne(alertId: string) {
+    setBusyId(alertId);
+    try {
+      await dismissAlertById(alertId);
+      dispatch({ type: "REMOVE_ALERT", id: alertId });
+      showToast("Alert deleted");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to delete alert");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDeleteAll() {
+    setClearingAll(true);
+    try {
+      await dismissAllAlerts();
+      dispatch({ type: "CLEAR_ALERTS" });
+      showToast("All alerts deleted");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to delete all alerts");
+    } finally {
+      setClearingAll(false);
+    }
+  }
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background, paddingTop: Math.max(insets.top, 10) }]}> 
@@ -31,6 +61,17 @@ export default function NotificationsScreen() {
           <ThemedText style={{ color: palette.accent, fontWeight: "700" }}>Mark Read</ThemedText>
         </TouchableOpacity>
       </View>
+
+      {items.length > 0 ? (
+        <TouchableOpacity
+          style={[styles.clearAllBtn, { borderColor: palette.border, backgroundColor: palette.card }]}
+          onPress={handleDeleteAll}
+          disabled={clearingAll}>
+          <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
+            {clearingAll ? "Deleting..." : "Delete All"}
+          </ThemedText>
+        </TouchableOpacity>
+      ) : null}
 
       <ScrollView contentContainerStyle={[styles.listWrap, { paddingBottom: insets.bottom + 90 }]}>
         {items.length === 0 ? (
@@ -58,6 +99,16 @@ export default function NotificationsScreen() {
               <ThemedText style={{ color: palette.muted, marginTop: 4, fontSize: 12 }}>
                 Instrument: {a.instrumentKey}
               </ThemedText>
+              <View style={styles.alertActions}>
+                <TouchableOpacity
+                  style={[styles.deleteBtn, { borderColor: palette.border }]}
+                  onPress={() => handleDeleteOne(a.id)}
+                  disabled={busyId === a.id}>
+                  <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
+                    {busyId === a.id ? "Deleting..." : "Delete"}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
             </ThemedView>
           ))
         )}
@@ -81,6 +132,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  clearAllBtn: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    alignItems: "center",
+  },
   listWrap: { gap: 10 },
   alertCard: {
     borderWidth: 1,
@@ -98,5 +157,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     gap: 8,
+  },
+  alertActions: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  deleteBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
 });

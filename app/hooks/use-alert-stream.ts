@@ -76,7 +76,6 @@ export function useAlertStream(enabled = true) {
 
           if (isNew) {
             notifiedIdsRef.current.add(parsed.id);
-            await notifyOnCriticalAlert(parsed, state.preferences);
           }
         }
       } catch (err) {

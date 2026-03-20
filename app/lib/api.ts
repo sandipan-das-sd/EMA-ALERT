@@ -281,6 +281,18 @@ export async function registerPushToken(pushToken: string) {
   });
 }
 
+export async function dismissAlertById(alertId: string) {
+  return request(`/alerts/${encodeURIComponent(alertId)}/dismiss`, {
+    method: 'PATCH',
+  });
+}
+
+export async function dismissAllAlerts() {
+  return request('/alerts/dismiss-all', {
+    method: 'PATCH',
+  });
+}
+
 export async function searchInstruments(query: string, options: { segments?: string[]; limit?: number } = {}) {
   const params = new URLSearchParams();
   params.set("q", query);

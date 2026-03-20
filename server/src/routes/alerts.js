@@ -20,6 +20,20 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Dismiss all active alerts for the current user
+router.patch('/dismiss-all', async (req, res) => {
+  try {
+    const result = await Alert.updateMany(
+      { userId: req.user.id, status: 'active' },
+      { $set: { status: 'dismissed' } }
+    );
+    res.json({ message: 'All alerts dismissed', modifiedCount: result.modifiedCount || 0 });
+  } catch (e) {
+    console.error('[Alerts] Dismiss all error:', e);
+    res.status(500).json({ message: 'Failed to dismiss all alerts', error: e.message });
+  }
+});
+
 // Dismiss an alert
 router.patch('/:id/dismiss', async (req, res) => {
   try {

@@ -66,6 +66,8 @@ export type AlertAction =
       };
     }
   | { type: "UPSERT_ALERT"; payload: EmaAlert }
+  | { type: "REMOVE_ALERT"; id: string }
+  | { type: "CLEAR_ALERTS" }
   | { type: "MARK_ALL_READ" }
   | { type: "SET_PREFERENCES"; payload: Partial<AlertPreferences> }
   | { type: "HYDRATE_PREFERENCES"; payload: AlertPreferences }

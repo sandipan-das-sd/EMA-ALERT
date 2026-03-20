@@ -155,6 +155,22 @@ function reducer(state: AlertState, action: AlertAction): AlertState {
       };
     }
 
+    case "REMOVE_ALERT": {
+      const nextAlerts = state.alerts.filter((a) => a.id !== action.id);
+      return {
+        ...state,
+        alerts: nextAlerts,
+        unreadCount: Math.min(state.unreadCount, nextAlerts.length),
+      };
+    }
+
+    case "CLEAR_ALERTS":
+      return {
+        ...state,
+        alerts: [],
+        unreadCount: 0,
+      };
+
     case "MARK_ALL_READ":
       return { ...state, unreadCount: 0 };
 
