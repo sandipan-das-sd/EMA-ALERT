@@ -19,7 +19,7 @@ const initialState: AlertState = {
   preferences: {
     vibrationEnabled: true,
     hapticsEnabled: true,
-    inAppSoundEnabled: false,
+    inAppSoundEnabled: true,
     pushNotificationsEnabled: true,
   },
   market: {

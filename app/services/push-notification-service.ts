@@ -1,5 +1,6 @@
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
 async function loadNotifications() {
   return import('expo-notifications');
@@ -19,7 +20,7 @@ export function configureNotifications() {
   }
 
   loadNotifications()
-    .then((Notifications) => {
+    .then(async (Notifications) => {
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
@@ -29,6 +30,18 @@ export function configureNotifications() {
           shouldShowList: true,
         }),
       });
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('alerts', {
+          name: 'EMA Alerts',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 200, 100, 250],
+          lightColor: '#2D6A4F',
+          sound: 'default',
+          enableVibrate: true,
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        });
+      }
     })
     .catch((error) => {
       console.warn('[Push] Failed to initialize notification handler:', error);
@@ -68,8 +81,14 @@ export async function requestPushPermissions(): Promise<string | null> {
       return null;
     }
 
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ||
+      Constants.easConfig?.projectId;
+
     // Get the push token
-    const token = await Notifications.getExpoPushTokenAsync();
+    const token = projectId
+      ? await Notifications.getExpoPushTokenAsync({ projectId })
+      : await Notifications.getExpoPushTokenAsync();
     console.log(`[Push] ✓ Token acquired: ${token.data.substring(0, 20)}...`);
     return token.data;
   } catch (error) {
@@ -108,6 +127,7 @@ export async function sendLocalNotification(
         data: data || {},
         sound: true,
         badge: 1,
+        ...(Platform.OS === 'android' ? { channelId: 'alerts' } : {}),
       },
       trigger: { type: 'timeInterval', seconds: 1 } as any,
     });
