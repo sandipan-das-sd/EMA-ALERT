@@ -3,6 +3,7 @@ import Alert from "../models/Alert.js";
 import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
 import { enqueueBufferedVoiceAlert } from "./voiceNotification.js";
 import { sendPushAlertToUser } from "./pushNotification.js";
+import { sendAlertEmailToUser } from "./emailNotification.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -866,6 +867,32 @@ export function startAlertEngine({
                     } catch (err) {
                       const pushDuration = Date.now() - pushStartTime;
                       console.warn(`[AlertEngine] Push notification error for ${instrumentName} (${pushDuration}ms):`, err?.message);
+                    }
+
+                    // Send email notification (non-blocking)
+                    const emailStartTime = Date.now();
+                    try {
+                      const User = (await import('../models/User.js')).default;
+                      const userForEmail = await User.findById(userId).select('email');
+                      if (userForEmail?.email) {
+                        const emailResult = await sendAlertEmailToUser(userForEmail, {
+                          instrumentKey,
+                          instrumentName,
+                          close: sig.close,
+                          ema: sig.ema,
+                          strategy: 'ema20_cross_up',
+                        }, { emailNotificationsEnabled: true });
+
+                        const emailDuration = Date.now() - emailStartTime;
+                        if (emailResult.sent) {
+                          console.log(`[AlertEngine] ✓ Email sent for ${instrumentName} (${emailDuration}ms)`);
+                        } else if (process.env.DEBUG_ALERTS) {
+                          console.log(`[AlertEngine] Email skipped/failed for ${instrumentName}: ${emailResult.reason || emailResult.error || 'unknown'} (${emailDuration}ms)`);
+                        }
+                      }
+                    } catch (err) {
+                      const emailDuration = Date.now() - emailStartTime;
+                      console.warn(`[AlertEngine] Email notification error for ${instrumentName} (${emailDuration}ms):`, err?.message);
                     }
                   } catch (e) {
                     console.warn(`[AlertEngine] Broadcast failed:`, e?.message);
