@@ -45,7 +45,7 @@ export function useAlertStream(enabled = true) {
 
   useEffect(() => {
     if (!enabled) {
-      dispatch({ type: "STREAM_DISCONNECTED", error: null });
+      dispatch({ type: "STREAM_DISCONNECTED" });
       return;
     }
 
