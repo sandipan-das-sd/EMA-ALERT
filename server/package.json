@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "seed:admin": "node scripts/seed-admin-user.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

@@ -349,7 +349,6 @@ function App() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" />
             <button disabled={busy} type="submit">{busy ? 'Signing in...' : 'Sign In as Admin'}</button>
           </form>
-          <p className="hint">Tip: Set ADMIN_EMAILS in server env for admin access allowlist.</p>
         </section>
       </main>
     );
