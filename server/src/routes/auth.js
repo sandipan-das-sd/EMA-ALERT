@@ -4,6 +4,21 @@ import { signToken } from '../utils/jwt.js';
 
 const router = express.Router();
 
+function getCookieName() {
+  return process.env.COOKIE_NAME || 'auth_token';
+}
+
+function getRequestToken(req) {
+  const cookieToken = req.cookies[getCookieName()];
+  if (cookieToken) return cookieToken;
+
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
+    return auth.slice(7);
+  }
+  return '';
+}
+
 function setTokenCookie(res, userId) {
   const token = signToken({ id: userId });
   const sameSite = (process.env.COOKIE_SAMESITE || 'lax').toLowerCase();
@@ -82,7 +97,7 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-  res.clearCookie(process.env.COOKIE_NAME, {
+  res.clearCookie(getCookieName(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -92,7 +107,7 @@ router.post('/logout', (req, res) => {
 
 router.put('/upstox-token', async (req, res) => {
   try {
-    const token = req.cookies[process.env.COOKIE_NAME];
+    const token = getRequestToken(req);
     if (!token) return res.status(401).json({ message: 'Not authenticated' });
     
     const { verifyToken } = await import('../utils/jwt.js');
@@ -134,7 +149,7 @@ router.put('/upstox-token', async (req, res) => {
 
 router.put('/phone', async (req, res) => {
   try {
-    const token = req.cookies[process.env.COOKIE_NAME];
+    const token = getRequestToken(req);
     if (!token) return res.status(401).json({ message: 'Not authenticated' });
     
     const { verifyToken } = await import('../utils/jwt.js');
@@ -167,7 +182,7 @@ router.put('/phone', async (req, res) => {
 
 router.post('/push-token', async (req, res) => {
   try {
-    const token = req.cookies[process.env.COOKIE_NAME];
+    const token = getRequestToken(req);
     if (!token) return res.status(401).json({ message: 'Not authenticated' });
     
     const { verifyToken } = await import('../utils/jwt.js');
@@ -199,7 +214,7 @@ router.post('/push-token', async (req, res) => {
 });
 
 router.get('/me', async (req, res) => {
-  const token = req.cookies[process.env.COOKIE_NAME];
+  const token = getRequestToken(req);
   if (!token) return res.status(200).json({ user: null });
   // Decoded in middleware would be cleaner; kept simple here
   import('../utils/jwt.js').then(({ verifyToken }) => {

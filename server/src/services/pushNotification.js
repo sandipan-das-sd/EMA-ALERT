@@ -34,20 +34,21 @@ export async function sendExpoPushNotification(pushToken, message) {
 
     if (response.status === 200) {
       const data = response.data;
-      if (data.data && data.data.length > 0) {
-        const ticket = data.data[0];
+      const ticket = Array.isArray(data?.data) ? data.data[0] : data?.data;
+      if (ticket) {
         if (ticket.status === 'ok') {
           return {
             success: true,
             ticket: ticket.id,
             message: `Push sent to ${pushToken.substring(0, 20)}...`,
           };
-        } else {
-          return {
-            success: false,
-            error: ticket.message || 'Unknown error',
-          };
         }
+
+        return {
+          success: false,
+          error: ticket.message || 'Unknown error',
+          details: ticket.details,
+        };
       }
     }
 
