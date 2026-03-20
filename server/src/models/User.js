@@ -43,6 +43,21 @@ const userSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+      index: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
     notes: [{
       title: {
         type: String,

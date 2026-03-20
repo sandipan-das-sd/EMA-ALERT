@@ -12,6 +12,7 @@ import notesRouter from './routes/notes.js';
 import instrumentsRouter from './routes/instruments.js';
 import alertsRouter from './routes/alerts.js';
 import voiceRouter from './routes/voice.js';
+import adminRouter from './routes/admin.js';
 import { createUpstoxFeed } from './services/upstoxFeed.js';
 import { startUpstoxPoller } from './services/upstoxPoller.js';
 import { instrumentsSearchService } from './services/instrumentsSearch.js';
@@ -122,6 +123,7 @@ app.use('/api/watchlist', watchlistRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/instruments', instrumentsRouter);
 app.use('/api/alerts', alertsRouter);
+app.use('/api/admin', adminRouter);
 app.use('/voice', voiceRouter);
 
 const PORT = process.env.PORT || 4000;

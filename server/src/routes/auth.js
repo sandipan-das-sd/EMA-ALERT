@@ -32,7 +32,7 @@ router.post('/signup', async (req, res) => {
     if (existing) return res.status(409).json({ message: 'Email already in use' });
     const user = await User.create({ name, email, password, phone: phone || '' });
   setTokenCookie(res, user._id.toString());
-  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone, watchlist: user.watchlist || [], hasUpstoxToken: false } });
+  res.status(201).json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone, watchlist: user.watchlist || [], hasUpstoxToken: false, role: user.role, isActive: user.isActive } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -47,8 +47,10 @@ router.post('/login', async (req, res) => {
     }
     const user = await User.findOne({ email }).select('+password');
     if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    if (user.isActive === false) return res.status(403).json({ message: 'Account is deactivated' });
     const match = await user.comparePassword(password);
     if (!match) return res.status(401).json({ message: 'Invalid credentials' });
+    user.lastLoginAt = new Date();
     
     // Update upstox access token if provided
     if (upstoxAccessToken !== undefined) {
@@ -72,7 +74,7 @@ router.post('/login', async (req, res) => {
     }
     
   setTokenCookie(res, user._id.toString());
-  res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
+  res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive } });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: 'Server error' });
@@ -205,7 +207,8 @@ router.get('/me', async (req, res) => {
     if (!decoded) return res.status(200).json({ user: null });
       User.findById(decoded.id).select('+upstoxAccessToken').then((user) => {
         if (!user) return res.status(200).json({ user: null });
-        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken } });
+        if (user.isActive === false) return res.status(200).json({ user: null });
+        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive } });
     });
   });
 });
