@@ -105,6 +105,22 @@ export interface OptionSearchFilters {
   debug?: boolean;
 }
 
+export interface ServerAlertItem {
+  _id?: string;
+  userId?: string;
+  instrumentKey: string;
+  instrumentName?: string;
+  timeframe?: string;
+  strategy?: string;
+  candle?: {
+    ts?: number;
+    close?: number;
+  };
+  ema?: number;
+  createdAt?: string;
+  status?: "active" | "dismissed";
+}
+
 function inferOptionTypeFromSymbol(symbol?: string | null) {
   const s = String(symbol || '').toUpperCase();
   if (/\bCE\b/.test(s)) return 'CE';
@@ -246,6 +262,16 @@ export async function removeFromWatchlist(instrumentKey: string) {
     method: "DELETE",
   });
   return (data?.watchlist || []) as string[];
+}
+
+export async function getAlerts(params: { status?: "active" | "dismissed"; since?: number; limit?: number } = {}) {
+  const qp = new URLSearchParams();
+  if (params.status) qp.set("status", params.status);
+  if (typeof params.since === "number" && Number.isFinite(params.since)) qp.set("since", String(params.since));
+  if (typeof params.limit === "number" && Number.isFinite(params.limit)) qp.set("limit", String(params.limit));
+  const suffix = qp.toString();
+  const data = await request(`/alerts${suffix ? `?${suffix}` : ""}`);
+  return (data?.alerts || []) as ServerAlertItem[];
 }
 
 export async function searchInstruments(query: string, options: { segments?: string[]; limit?: number } = {}) {

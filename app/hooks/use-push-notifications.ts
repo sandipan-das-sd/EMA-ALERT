@@ -23,6 +23,7 @@ export function usePushNotifications(enabled = true) {
   const notificationListener = useRef<NotificationSubscription | null>(null);
   const responseListener = useRef<NotificationSubscription | null>(null);
   const registeredRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -58,14 +59,22 @@ export function usePushNotifications(enabled = true) {
               const data = await response.json();
               console.log('[Push Hook] ✓ Token registered:', data.message);
             } else {
-              console.error('[Push Hook] Failed to register token:', response.status);
+              const text = await response.text();
+              console.error('[Push Hook] Failed to register token:', response.status, text || 'no response body');
+              registeredRef.current = false;
             }
           } catch (err) {
             console.error('[Push Hook] Error registering token:', err);
+            registeredRef.current = false;
           }
         }
       } catch (err) {
         console.error('[Push Hook] Setup failed:', err);
+      } finally {
+        if (!registeredRef.current) {
+          // Retry registration periodically to survive transient auth/network races.
+          retryTimerRef.current = setTimeout(setupPush, 45_000);
+        }
       }
     };
 
@@ -97,6 +106,9 @@ export function usePushNotifications(enabled = true) {
       }
       if (responseListener.current) {
         responseListener.current.remove();
+      }
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
       }
     };
   }, [enabled]);

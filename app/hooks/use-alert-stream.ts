@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { APP_CONFIG } from "@/lib/config";
 import { notifyOnCriticalAlert } from "@/services/notification-service";
+import { getAlerts } from "@/lib/api";
 import type { EmaAlert } from "@/types/alert";
 import { useAlertContext } from "@/contexts/alert-context";
 
@@ -30,7 +31,17 @@ export function useAlertStream(enabled = true) {
   const { state, dispatch } = useAlertContext();
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const attemptRef = useRef(0);
+  const notifiedIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const known = new Set<string>();
+    for (const alert of state.alerts) {
+      if (alert?.id) known.add(alert.id);
+    }
+    notifiedIdsRef.current = known;
+  }, [state.alerts]);
 
   useEffect(() => {
     if (!enabled) {
@@ -39,6 +50,40 @@ export function useAlertStream(enabled = true) {
     }
 
     let alive = true;
+
+    const upsertFromServer = async () => {
+      try {
+        const rows = await getAlerts({ status: "active", limit: 100 });
+        for (const row of rows) {
+          const parsed = toAlertPayload({
+            userId: row.userId,
+            instrumentKey: row.instrumentKey,
+            instrumentName: row.instrumentName,
+            timeframe: row.timeframe,
+            strategy: row.strategy,
+            candle: {
+              ts: row.candle?.ts,
+              close: row.candle?.close,
+            },
+            ema: row.ema,
+            createdAt: row.createdAt,
+          });
+          if (!parsed) continue;
+
+          const isNew = !notifiedIdsRef.current.has(parsed.id);
+          dispatch({ type: "UPSERT_ALERT", payload: parsed });
+
+          if (isNew) {
+            notifiedIdsRef.current.add(parsed.id);
+            await notifyOnCriticalAlert(parsed, state.preferences);
+          }
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[App] Alerts poll failed", err);
+        }
+      }
+    };
 
     const connect = () => {
       if (!alive) return;
@@ -92,6 +137,7 @@ export function useAlertStream(enabled = true) {
             if (data.type === "alert") {
               const parsed = toAlertPayload(data.alert);
               if (!parsed) return;
+              notifiedIdsRef.current.add(parsed.id);
               dispatch({ type: "UPSERT_ALERT", payload: parsed });
               await notifyOnCriticalAlert(parsed, state.preferences);
             }
@@ -118,10 +164,13 @@ export function useAlertStream(enabled = true) {
       }
     };
 
+    upsertFromServer();
+    pollTimerRef.current = setInterval(upsertFromServer, 15_000);
     connect();
 
     return () => {
       alive = false;
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (socketRef.current) {
         socketRef.current.close();
