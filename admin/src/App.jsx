@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
+import { API_BASE } from './lib/runtime-config';
+import { useWsContext } from './contexts/ws-context.jsx';
 
 async function api(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method || 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-    credentials: 'include',
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: options.method || 'GET',
+      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      credentials: 'include',
+    });
+  } catch {
+    throw new Error(`Failed to fetch API at ${API_BASE}`);
+  }
 
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -49,6 +54,7 @@ function StatCard({ label, value, hint }) {
 }
 
 function App() {
+  const ws = useWsContext();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authUser, setAuthUser] = useState(null);
@@ -360,8 +366,12 @@ function App() {
         <div>
           <h1>EMA Admin Console</h1>
           <p className="sub">{authUser.name} · {authUser.email}</p>
+          <p className="hint">API: {API_BASE}</p>
         </div>
         <div className="actions">
+          <span className={ws.connected ? 'live-chip ok-chip' : 'live-chip err-chip'}>
+            {ws.connected ? 'WS Live' : 'WS Offline'}
+          </span>
           <button className="ghost" onClick={loadAll}>Refresh</button>
           <button className="danger" onClick={logout}>Logout</button>
         </div>
@@ -376,6 +386,13 @@ function App() {
         <StatCard label="Watchlist Items" value={overview?.totals?.watchlistItemsCount ?? '-'} hint="Across all users" />
         <StatCard label="Notes" value={overview?.totals?.notesCount ?? '-'} hint="All user notes" />
         <StatCard label="Live Quotes" value={market?.totalQuotes ?? '-'} hint="Market cache diagnostics" />
+        <StatCard label="WS Alerts" value={ws.alertsReceived} hint="Live alerts from stream" />
+        <StatCard label="WS Last Type" value={ws.latestType || '-'} hint="Latest stream event" />
+        <StatCard
+          label="WS Last Message"
+          value={ws.lastMessageAt ? new Date(ws.lastMessageAt).toLocaleTimeString() : '-'}
+          hint={ws.lastError ? `Err: ${ws.lastError}` : 'Stream heartbeat'}
+        />
       </section>
 
       <nav className="tabs">
