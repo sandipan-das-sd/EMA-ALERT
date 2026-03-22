@@ -83,7 +83,11 @@ async function exchangeUpstoxAuthCode({ code, clientId, clientSecret, redirectUr
   }
 
   if (!response.ok) {
-    const message = data?.errors?.[0]?.message || data?.message || `Token exchange failed (${response.status})`;
+    const upstoxCode = String(data?.errors?.[0]?.errorCode || data?.errors?.[0]?.error_code || '').trim();
+    const baseMessage = data?.errors?.[0]?.message || data?.message || `Token exchange failed (${response.status})`;
+    const message = upstoxCode === 'UDAPI100016'
+      ? 'Invalid Credentials from Upstox. Check client_id/client_secret pair, ensure redirect_uri exactly matches Upstox app settings, and retry with a fresh authorization code.'
+      : baseMessage;
     const err = new Error(message);
     err.statusCode = response.status;
     err.upstoxResponse = data;
