@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { router } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,6 +9,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { getUpstoxOAuthStatus, logoutUpstox, startUpstoxOAuth } from "@/lib/api";
 
 export default function UpstoxTokenScreen() {
   const colorScheme = useColorScheme() ?? "light";
@@ -19,6 +21,50 @@ export default function UpstoxTokenScreen() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthState, setOauthState] = useState("");
+  const [oauthExpiry, setOauthExpiry] = useState<number | null>(null);
+
+  const oauthActive = useMemo(() => {
+    if (!oauthState) return false;
+    if (!oauthExpiry) return true;
+    return Date.now() < oauthExpiry;
+  }, [oauthState, oauthExpiry]);
+
+  useEffect(() => {
+    if (!oauthState) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const statusResp = await getUpstoxOAuthStatus(oauthState);
+        if (statusResp.status === "success") {
+          clearInterval(interval);
+          setOauthState("");
+          setOauthExpiry(null);
+          setMessage("Upstox connected. Redirecting to dashboard...");
+          await refreshMe();
+          router.replace("/(tabs)");
+          return;
+        }
+
+        if (statusResp.status === "error" || statusResp.status === "expired") {
+          clearInterval(interval);
+          setOauthState("");
+          setOauthExpiry(null);
+          setError(statusResp.message || "Upstox authorization failed. Please retry.");
+        }
+      } catch (pollError) {
+        const text = pollError instanceof Error ? pollError.message : "Failed to check OAuth status";
+        if (!/pending/i.test(text)) {
+          clearInterval(interval);
+          setOauthState("");
+          setOauthExpiry(null);
+          setError(text);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [oauthState, refreshMe]);
 
   async function handleSave() {
     setError("");
@@ -39,6 +85,76 @@ export default function UpstoxTokenScreen() {
     }
   }
 
+  async function handleConnectUpstox() {
+    setError("");
+    setMessage("");
+    setLoading(true);
+
+    try {
+      const start = await startUpstoxOAuth();
+      setOauthState(start.state);
+      setOauthExpiry(start.expiresAt);
+      setMessage("Browser opened. Complete Upstox login and return to app.");
+      await WebBrowser.openBrowserAsync(start.authorizeUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start Upstox authorization");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCheckStatusNow() {
+    if (!oauthState) {
+      setError("No active authorization request. Tap Connect Upstox first.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      const statusResp = await getUpstoxOAuthStatus(oauthState);
+      if (statusResp.status === "success") {
+        setOauthState("");
+        setOauthExpiry(null);
+        setMessage("Upstox connected. Redirecting to dashboard...");
+        await refreshMe();
+        router.replace("/(tabs)");
+        return;
+      }
+      if (statusResp.status === "pending") {
+        setMessage("Authorization still pending. Approve in browser, then check again.");
+        return;
+      }
+
+      setOauthState("");
+      setOauthExpiry(null);
+      setError(statusResp.message || "Upstox authorization failed. Please retry.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to check authorization status");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUpstoxLogout() {
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      await logoutUpstox();
+      await refreshMe();
+      setOauthState("");
+      setOauthExpiry(null);
+      setToken("");
+      setMessage("Disconnected from Upstox. Connect again to continue.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to logout from Upstox");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <SafeAreaView edges={["top", "bottom"]} style={[styles.safe, { backgroundColor: palette.background }]}>
       <ScrollView
@@ -51,12 +167,28 @@ export default function UpstoxTokenScreen() {
       <ThemedView style={[styles.container, { backgroundColor: palette.background }]}> 
         <ThemedText style={[styles.eyebrow, { color: palette.accent }]}>EMA ALERT</ThemedText>
         <ThemedText type="title" style={styles.title}>Upstox Token</ThemedText>
-        <ThemedText style={[styles.subtitle, { color: palette.muted }]}>Paste your Upstox access token before entering dashboard</ThemedText>
+        <ThemedText style={[styles.subtitle, { color: palette.muted }]}>Connect your Upstox account using OAuth. Manual token paste is kept as fallback.</ThemedText>
 
         {message ? <ThemedText style={[styles.ok, { color: palette.success }]}>{message}</ThemedText> : null}
         {error ? <ThemedText style={[styles.error, { color: palette.danger }]}>{error}</ThemedText> : null}
 
         <View style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+          <Pressable onPress={handleConnectUpstox} disabled={loading} style={[styles.button, { backgroundColor: palette.accent }]}> 
+            <ThemedText style={styles.buttonText}>{loading ? "Working..." : "Connect Upstox (Auto)"}</ThemedText>
+          </Pressable>
+
+          <Pressable onPress={handleCheckStatusNow} disabled={loading || !oauthState} style={[styles.secondaryBtn, { borderColor: palette.border }]}> 
+            <ThemedText style={{ color: palette.text, fontWeight: "700" }}>
+              {oauthActive ? "I have approved, check status" : "Authorization expired, reconnect"}
+            </ThemedText>
+          </Pressable>
+
+          <Pressable onPress={handleUpstoxLogout} disabled={loading} style={[styles.secondaryBtn, { borderColor: palette.border }]}> 
+            <ThemedText style={{ color: palette.text, fontWeight: "700" }}>Disconnect Upstox</ThemedText>
+          </Pressable>
+
+          <View style={[styles.separator, { borderColor: palette.border }]} />
+
           <TextInput
             placeholder="Paste Upstox access token"
             placeholderTextColor={palette.muted}
@@ -99,6 +231,10 @@ const styles = StyleSheet.create({
   ok: { marginBottom: 8, fontWeight: "600" },
   error: { marginBottom: 8, fontWeight: "600" },
   card: { borderWidth: 1, borderRadius: 18, padding: 16, gap: 12 },
+  separator: {
+    borderBottomWidth: 1,
+    marginVertical: 2,
+  },
   input: {
     borderWidth: 1,
     borderRadius: 12,

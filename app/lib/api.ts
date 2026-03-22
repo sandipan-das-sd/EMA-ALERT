@@ -214,6 +214,34 @@ export async function updateUpstoxToken(upstoxAccessToken: string) {
   });
 }
 
+export interface UpstoxOAuthStartResponse {
+  authorizeUrl: string;
+  state: string;
+  expiresAt: number;
+  redirectUri: string;
+}
+
+export interface UpstoxOAuthStatusResponse {
+  status: 'pending' | 'success' | 'error' | 'expired';
+  message?: string;
+  expiresAt?: number;
+  completedAt?: number;
+}
+
+export async function startUpstoxOAuth() {
+  return request('/auth/upstox/oauth/start') as Promise<UpstoxOAuthStartResponse>;
+}
+
+export async function getUpstoxOAuthStatus(state: string) {
+  const params = new URLSearchParams();
+  params.set('state', state);
+  return request(`/auth/upstox/oauth/status?${params.toString()}`) as Promise<UpstoxOAuthStatusResponse>;
+}
+
+export async function logoutUpstox() {
+  return request('/auth/upstox/logout', { method: 'POST' });
+}
+
 export async function getWatchlist() {
   const data = await request("/watchlist");
   return (data?.watchlist || []) as WatchlistItem[];
