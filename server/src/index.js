@@ -171,7 +171,9 @@ async function start() {
     // WS server to stream price ticks to frontend clients
   const wss = new WebSocketServer({ server, path: '/ws/ticker' });
   wss.clients.forEach = wss.clients.forEach.bind(wss.clients); // defensive in some node/ws combos
-    const apiBase = process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3';
+    const apiBase = process.env.UPSTOX_SANDBOX === 'true'
+      ? 'https://api-sandbox.upstox.com/v3'
+      : (process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3');
     
     // Use mutable object to store access token so it can be updated dynamically
     const tokenStore = {
