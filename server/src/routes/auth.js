@@ -7,9 +7,12 @@ import { sendExpoPushNotification } from '../services/pushNotification.js';
 
 const router = express.Router();
 
-const UPSTOX_AUTH_DIALOG_URL = process.env.UPSTOX_AUTH_DIALOG_URL || 'https://api.upstox.com/v2/login/authorization/dialog';
-const UPSTOX_TOKEN_URL = process.env.UPSTOX_TOKEN_URL || 'https://api.upstox.com/v2/login/authorization/token';
-const UPSTOX_LOGOUT_URL = process.env.UPSTOX_LOGOUT_URL || 'https://api.upstox.com/v2/logout';
+const _UPSTOX_BASE = process.env.UPSTOX_SANDBOX === 'true'
+  ? 'https://api-sandbox.upstox.com/v2'
+  : 'https://api.upstox.com/v2';
+const UPSTOX_AUTH_DIALOG_URL = process.env.UPSTOX_AUTH_DIALOG_URL || `${_UPSTOX_BASE}/login/authorization/dialog`;
+const UPSTOX_TOKEN_URL = process.env.UPSTOX_TOKEN_URL || `${_UPSTOX_BASE}/login/authorization/token`;
+const UPSTOX_LOGOUT_URL = process.env.UPSTOX_LOGOUT_URL || `${_UPSTOX_BASE}/logout`;
 const OAUTH_PENDING_TTL_MS = 10 * 60 * 1000;
 const OAUTH_RESULT_TTL_MS = 5 * 60 * 1000;
 
