@@ -75,7 +75,7 @@ async function onSignal(userId, instrumentKey, sig) {
 
   try {
     const User = (await import('../models/User.js')).default;
-    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots');
+    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct');
 
     if (!user?.autoTrade?.enabled) return;
     if (!user.upstoxAccessToken) {
@@ -89,7 +89,8 @@ async function onSignal(userId, instrumentKey, sig) {
     const instrument = instrumentsSearchService.getInstrument(instrumentKey);
     const lotSize = instrument?.lotSize ?? 1;
     const quantity = Math.max(1, lots * lotSize);
-    const product = user.autoTrade.product || 'I';
+    // Per-instrument product overrides global setting
+    const product = user.watchlistProduct?.get(instrumentKey) ?? user.autoTrade.product ?? 'I';
     const entryPrice = sig.high;
     const initialSL = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
     const slDistance = entryPrice - initialSL;

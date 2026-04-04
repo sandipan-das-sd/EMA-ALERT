@@ -64,6 +64,12 @@ const userSchema = new mongoose.Schema(
       of: Number,
       default: {},
     },
+    // Per-instrument product preference: 'I' = Intraday, 'D' = Delivery
+    watchlistProduct: {
+      type: Map,
+      of: String,
+      default: {},
+    },
     // Auto-trade configuration
     autoTrade: {
       enabled: { type: Boolean, default: false },

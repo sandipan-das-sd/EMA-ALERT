@@ -81,6 +81,7 @@ router.get("/", async (req, res) => {
 
       const lots = user.watchlistLots?.get(key) ?? 1;
       const lotSize = instrument?.lotSize ?? 1;
+      const product = user.watchlistProduct?.get(key) ?? 'I';
 
       return {
         key,
@@ -94,6 +95,7 @@ router.get("/", async (req, res) => {
         ts,
         lots,
         lotSize,
+        product,
       };
     });
 
@@ -111,7 +113,7 @@ router.get("/", async (req, res) => {
 // POST add instrument
 router.post("/", async (req, res) => {
   try {
-    const { instrumentKey, lots } = req.body;
+    const { instrumentKey, lots, product } = req.body;
     if (!instrumentKey)
       return res.status(400).json({ message: "instrumentKey required" });
     if (allowedSet.size && !allowedSet.has(instrumentKey)) {
@@ -127,6 +129,11 @@ router.post("/", async (req, res) => {
     user.watchlistLots = user.watchlistLots ?? new Map();
     user.watchlistLots.set(instrumentKey, safeLots);
     user.markModified('watchlistLots');
+    // Store product preference (default 'I')
+    const safeProduct = product === 'D' ? 'D' : 'I';
+    user.watchlistProduct = user.watchlistProduct ?? new Map();
+    user.watchlistProduct.set(instrumentKey, safeProduct);
+    user.markModified('watchlistProduct');
     await user.save();
     // Trigger dynamic subscription update
     await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
@@ -146,6 +153,10 @@ router.delete("/:instrumentKey", async (req, res) => {
     if (user.watchlistLots) {
       user.watchlistLots.delete(instrumentKey);
       user.markModified('watchlistLots');
+    }
+    if (user.watchlistProduct) {
+      user.watchlistProduct.delete(instrumentKey);
+      user.markModified('watchlistProduct');
     }
     await user.save();
     // Trigger dynamic subscription update
@@ -174,6 +185,26 @@ router.patch("/:instrumentKey/lots", async (req, res) => {
     user.markModified('watchlistLots');
     await user.save();
     res.json({ instrumentKey, lots });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH update product for an existing watchlist item
+router.patch("/:instrumentKey/product", async (req, res) => {
+  try {
+    const { instrumentKey } = req.params;
+    const product = req.body.product === 'D' ? 'D' : 'I';
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.watchlist.includes(instrumentKey)) {
+      return res.status(404).json({ message: "Instrument not in watchlist" });
+    }
+    user.watchlistProduct = user.watchlistProduct ?? new Map();
+    user.watchlistProduct.set(instrumentKey, product);
+    user.markModified('watchlistProduct');
+    await user.save();
+    res.json({ instrumentKey, product });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }
