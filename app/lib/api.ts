@@ -21,7 +21,8 @@ export interface WatchlistItem {
   ts?: string | null;
   lots?: number;
   lotSize?: number;
-  product?: 'I' | 'D';
+  product?: 'I' | 'D' | 'MTF';
+  direction?: 'BUY' | 'SELL';
 }
 
 export interface MarketIndexItem {
@@ -280,10 +281,10 @@ export async function getBatchLtp(keys: string[]) {
   return (data?.data || {}) as Record<string, any>;
 }
 
-export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' = 'I') {
+export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' | 'MTF' = 'I', direction: 'BUY' | 'SELL' = 'BUY') {
   const data = await request("/watchlist", {
     method: "POST",
-    body: { instrumentKey, lots, product },
+    body: { instrumentKey, lots, product, direction },
   });
   return (data?.watchlist || []) as string[];
 }
@@ -295,10 +296,17 @@ export async function updateWatchlistLots(instrumentKey: string, lots: number) {
   });
 }
 
-export async function updateWatchlistProduct(instrumentKey: string, product: 'I' | 'D') {
+export async function updateWatchlistProduct(instrumentKey: string, product: 'I' | 'D' | 'MTF') {
   return request(`/watchlist/${encodeURIComponent(instrumentKey)}/product`, {
     method: "PATCH",
     body: { product },
+  });
+}
+
+export async function updateWatchlistDirection(instrumentKey: string, direction: 'BUY' | 'SELL') {
+  return request(`/watchlist/${encodeURIComponent(instrumentKey)}/direction`, {
+    method: "PATCH",
+    body: { direction },
   });
 }
 

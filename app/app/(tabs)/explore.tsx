@@ -24,6 +24,7 @@ import {
   searchOptionContracts,
   updateWatchlistLots,
   updateWatchlistProduct,
+  updateWatchlistDirection,
   type InstrumentSearchItem,
   type OptionFilterMeta,
   type WatchlistItem,
@@ -52,8 +53,8 @@ export default function WatchlistScreen() {
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Lots picker state: when user taps "+ Add", we ask how many lots + product before confirming
-  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; product: 'I' | 'D' } | null>(null);
+  // Lots picker state: when user taps "+ Add", we ask how many lots + product + direction before confirming
+  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL' } | null>(null);
 
   // Stock search state
   const [stockQuery, setStockQuery] = useState('');
@@ -298,6 +299,7 @@ export default function WatchlistScreen() {
     const isPickingLots = lotsPending?.key === item.key;
     const pendingLots = isPickingLots ? lotsPending!.lots : 1;
     const pendingProduct = isPickingLots ? lotsPending!.product : 'I';
+    const pendingDirection = isPickingLots ? lotsPending!.direction : 'BUY';
     const lotSize = item.lotSize ?? 1;
     const effectiveQty = pendingLots * lotSize;
     return (
@@ -309,7 +311,7 @@ export default function WatchlistScreen() {
           </ThemedText>
           {isPickingLots && (
             <ThemedText style={[styles.resultSub, { color: palette.tint }]}>
-              {pendingLots} lot{pendingLots !== 1 ? 's' : ''} × {lotSize} = {effectiveQty} qty · {pendingProduct === 'I' ? 'Intraday' : 'Delivery'}
+              {pendingLots} lot{pendingLots !== 1 ? 's' : ''} × {lotSize} = {effectiveQty} qty · {pendingProduct === 'I' ? 'Intraday' : pendingProduct === 'MTF' ? 'MTF' : 'Delivery'} · {pendingDirection}
             </ThemedText>
           )}
         </View>
@@ -333,7 +335,7 @@ export default function WatchlistScreen() {
                 <ThemedText style={{ fontWeight: '700', fontSize: 16 }}>+</ThemedText>
               </Pressable>
             </View>
-            {/* Intraday / Delivery row */}
+            {/* Intraday / Delivery / MTF row */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Pressable
                 onPress={() => setLotsPending((p) => p ? { ...p, product: 'I' } : p)}
@@ -346,8 +348,31 @@ export default function WatchlistScreen() {
                 <ThemedText style={[styles.productBtnText, { color: pendingProduct === 'D' ? '#fff' : '#16a34a' }]}>Delivery</ThemedText>
               </Pressable>
               <Pressable
+                onPress={() => setLotsPending((p) => p ? { ...p, product: 'MTF' } : p)}
+                style={[styles.productBtn, { backgroundColor: pendingProduct === 'MTF' ? '#7c3aed' : palette.card, borderColor: '#7c3aed' }]}>
+                <ThemedText style={[styles.productBtnText, { color: pendingProduct === 'MTF' ? '#fff' : '#7c3aed' }]}>MTF</ThemedText>
+              </Pressable>
+            </View>
+            {/* BUY / SELL direction row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Pressable
+                onPress={() => setLotsPending((p) => p ? { ...p, direction: 'BUY' } : p)}
+                style={[styles.productBtn, { backgroundColor: pendingDirection === 'BUY' ? '#16a34a' : palette.card, borderColor: '#16a34a' }]}>
+                <ThemedText style={[styles.productBtnText, { color: pendingDirection === 'BUY' ? '#fff' : '#16a34a' }]}>BUY</ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => pendingProduct === 'I' && setLotsPending((p) => p ? { ...p, direction: 'SELL' } : p)}
+                disabled={pendingProduct !== 'I'}
+                style={[styles.productBtn, {
+                  backgroundColor: pendingDirection === 'SELL' ? '#dc2626' : palette.card,
+                  borderColor: '#dc2626',
+                  opacity: pendingProduct !== 'I' ? 0.35 : 1,
+                }]}>
+                <ThemedText style={[styles.productBtnText, { color: pendingDirection === 'SELL' ? '#fff' : '#dc2626' }]}>SELL</ThemedText>
+              </Pressable>
+              <Pressable
                 disabled={busy}
-                onPress={() => onAdd(item, pendingLots, pendingProduct)}
+                onPress={() => onAdd(item, pendingLots, pendingProduct, pendingDirection)}
                 style={[styles.addBtn, { backgroundColor: '#16a34a', opacity: busy ? 0.6 : 1 }]}>
                 <ThemedText style={styles.addBtnText}>{busy ? '…' : '✓'}</ThemedText>
               </Pressable>
@@ -356,7 +381,7 @@ export default function WatchlistScreen() {
         ) : (
           <Pressable
             disabled={busy}
-            onPress={() => setLotsPending({ key: item.key, lots: 1, product: 'I' })}
+            onPress={() => setLotsPending({ key: item.key, lots: 1, product: 'I', direction: 'BUY' })}
             style={[styles.addBtn, { backgroundColor: palette.tint, opacity: busy ? 0.6 : 1 }]}>
             <ThemedText style={styles.addBtnText}>{busy ? '…' : '+ Add'}</ThemedText>
           </Pressable>
@@ -380,6 +405,7 @@ export default function WatchlistScreen() {
     const totalQty = lots * lotSize;
     const showLotsBadge = lotSize > 1 || lots > 1;
     const product = item.product ?? 'I';
+    const direction = item.direction ?? 'BUY';
     return (
       <View style={[styles.watchItem, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.watchTop}>
@@ -441,7 +467,7 @@ export default function WatchlistScreen() {
             </ThemedText>
           </View>
         )}
-        {/* Intraday / Delivery toggle */}
+        {/* Intraday / Delivery / MTF toggle */}
         <View style={styles.lotsRow}>
           <Pressable
             onPress={() => onUpdateProduct(item.key, 'I')}
@@ -452,6 +478,29 @@ export default function WatchlistScreen() {
             onPress={() => onUpdateProduct(item.key, 'D')}
             style={[styles.productBtn, { backgroundColor: product === 'D' ? '#16a34a' : palette.card, borderColor: '#16a34a' }]}>
             <ThemedText style={[styles.productBtnText, { color: product === 'D' ? '#fff' : '#16a34a' }]}>Delivery</ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => onUpdateProduct(item.key, 'MTF')}
+            style={[styles.productBtn, { backgroundColor: product === 'MTF' ? '#7c3aed' : palette.card, borderColor: '#7c3aed' }]}>
+            <ThemedText style={[styles.productBtnText, { color: product === 'MTF' ? '#fff' : '#7c3aed' }]}>MTF</ThemedText>
+          </Pressable>
+        </View>
+        {/* BUY / SELL direction toggle */}
+        <View style={styles.lotsRow}>
+          <Pressable
+            onPress={() => onUpdateDirection(item.key, 'BUY')}
+            style={[styles.productBtn, { backgroundColor: direction === 'BUY' ? '#16a34a' : palette.card, borderColor: '#16a34a' }]}>
+            <ThemedText style={[styles.productBtnText, { color: direction === 'BUY' ? '#fff' : '#16a34a' }]}>BUY</ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => product === 'I' && onUpdateDirection(item.key, 'SELL')}
+            disabled={product !== 'I'}
+            style={[styles.productBtn, {
+              backgroundColor: direction === 'SELL' ? '#dc2626' : palette.card,
+              borderColor: '#dc2626',
+              opacity: product !== 'I' ? 0.35 : 1,
+            }]}>
+            <ThemedText style={[styles.productBtnText, { color: direction === 'SELL' ? '#fff' : '#dc2626' }]}>SELL</ThemedText>
           </Pressable>
         </View>
       </View>
