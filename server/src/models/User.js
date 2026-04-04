@@ -58,6 +58,12 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Per-instrument lots preference for watchlist (instrumentKey → lots count)
+    watchlistLots: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
     // Auto-trade configuration
     autoTrade: {
       enabled: { type: Boolean, default: false },

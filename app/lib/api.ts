@@ -19,6 +19,8 @@ export interface WatchlistItem {
   changePct?: number | null;
   change?: number | null;
   ts?: string | null;
+  lots?: number;
+  lotSize?: number;
 }
 
 export interface MarketIndexItem {
@@ -277,12 +279,19 @@ export async function getBatchLtp(keys: string[]) {
   return (data?.data || {}) as Record<string, any>;
 }
 
-export async function addToWatchlist(instrumentKey: string) {
+export async function addToWatchlist(instrumentKey: string, lots = 1) {
   const data = await request("/watchlist", {
     method: "POST",
-    body: { instrumentKey },
+    body: { instrumentKey, lots },
   });
   return (data?.watchlist || []) as string[];
+}
+
+export async function updateWatchlistLots(instrumentKey: string, lots: number) {
+  return request(`/watchlist/${encodeURIComponent(instrumentKey)}/lots`, {
+    method: "PATCH",
+    body: { lots },
+  });
 }
 
 export async function removeFromWatchlist(instrumentKey: string) {

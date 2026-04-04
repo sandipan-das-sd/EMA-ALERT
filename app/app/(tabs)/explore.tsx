@@ -22,6 +22,7 @@ import {
   removeFromWatchlist,
   searchInstruments,
   searchOptionContracts,
+  updateWatchlistLots,
   type InstrumentSearchItem,
   type OptionFilterMeta,
   type WatchlistItem,
@@ -49,6 +50,9 @@ export default function WatchlistScreen() {
   // WebSocket for live prices
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lots picker state: when user taps "+ Add", we ask how many lots before confirming
+  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number } | null>(null);
 
   // Stock search state
   const [stockQuery, setStockQuery] = useState('');
@@ -246,15 +250,26 @@ export default function WatchlistScreen() {
   }, [optStrikeQuery, optSegment, normOptUnderlying, hasValidUnderlying, optYear, optMonth, optDay, optOptionType, showSearch, searchMode]);
 
   // ── Mutations ───────────────────────────────────────────────────
-  async function onAdd(item: InstrumentSearchItem) {
+  async function onAdd(item: InstrumentSearchItem, lots: number) {
     try {
       setMutatingKey(item.key);
-      await addToWatchlist(item.key);
+      setLotsPending(null);
+      await addToWatchlist(item.key, lots);
       await loadWatchlist();
-      showToast(`${item.tradingSymbol} added`);
+      const lotSize = item.lotSize ?? 1;
+      const qty = lots * lotSize;
+      showToast(`${item.tradingSymbol} added · ${lots} lot${lots !== 1 ? 's' : ''} (${qty} qty)`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to add');
     } finally { setMutatingKey(null); }
+  }
+
+  async function onUpdateLots(key: string, newLots: number) {
+    if (!Number.isInteger(newLots) || newLots < 1) return;
+    try {
+      await updateWatchlistLots(key, newLots);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, lots: newLots } : it));
+    } catch { showToast('Could not update lots'); }
   }
 
   async function onRemove(key: string) {
@@ -272,6 +287,10 @@ export default function WatchlistScreen() {
     const inWL = watchlistKeys.has(item.key);
     const busy = mutatingKey === item.key;
     const expStr = item.expiry ? String(item.expiry).slice(0, 10) : null;
+    const isPickingLots = lotsPending?.key === item.key;
+    const pendingLots = isPickingLots ? lotsPending!.lots : 1;
+    const lotSize = item.lotSize ?? 1;
+    const effectiveQty = pendingLots * lotSize;
     return (
       <View style={[styles.resultRow, { borderColor: palette.border }]}>
         <View style={{ flex: 1 }}>
@@ -279,13 +298,44 @@ export default function WatchlistScreen() {
           <ThemedText style={[styles.resultSub, { color: palette.muted }]}>
             {item.segment}{expStr ? ` · Exp ${expStr}` : ''}{typeof item.strike === 'number' ? ` · ₹${item.strike}` : ''}{item.optionType ? ` · ${item.optionType}` : ''}
           </ThemedText>
+          {isPickingLots && (
+            <ThemedText style={[styles.resultSub, { color: palette.tint }]}>
+              {pendingLots} lot{pendingLots !== 1 ? 's' : ''} × {lotSize} = {effectiveQty} qty
+            </ThemedText>
+          )}
         </View>
-        <Pressable
-          disabled={busy || inWL}
-          onPress={() => onAdd(item)}
-          style={[styles.addBtn, { backgroundColor: inWL ? '#16a34a' : palette.tint, opacity: busy ? 0.6 : 1 }]}>
-          <ThemedText style={styles.addBtnText}>{busy ? '…' : inWL ? '✓' : '+ Add'}</ThemedText>
-        </Pressable>
+        {inWL ? (
+          <View style={[styles.addBtn, { backgroundColor: '#16a34a' }]}>
+            <ThemedText style={styles.addBtnText}>✓</ThemedText>
+          </View>
+        ) : isPickingLots ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable
+              onPress={() => setLotsPending((p) => p ? { ...p, lots: Math.max(1, p.lots - 1) } : p)}
+              style={[styles.lotsStepBtn, { borderColor: palette.border }]}>
+              <ThemedText style={{ fontWeight: '700', fontSize: 16 }}>−</ThemedText>
+            </Pressable>
+            <ThemedText style={{ minWidth: 24, textAlign: 'center', fontWeight: '700' }}>{pendingLots}</ThemedText>
+            <Pressable
+              onPress={() => setLotsPending((p) => p ? { ...p, lots: p.lots + 1 } : p)}
+              style={[styles.lotsStepBtn, { borderColor: palette.border }]}>
+              <ThemedText style={{ fontWeight: '700', fontSize: 16 }}>+</ThemedText>
+            </Pressable>
+            <Pressable
+              disabled={busy}
+              onPress={() => onAdd(item, pendingLots)}
+              style={[styles.addBtn, { backgroundColor: '#16a34a', opacity: busy ? 0.6 : 1 }]}>
+              <ThemedText style={styles.addBtnText}>{busy ? '…' : '✓'}</ThemedText>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            disabled={busy}
+            onPress={() => setLotsPending({ key: item.key, lots: 1 })}
+            style={[styles.addBtn, { backgroundColor: palette.tint, opacity: busy ? 0.6 : 1 }]}>
+            <ThemedText style={styles.addBtnText}>{busy ? '…' : '+ Add'}</ThemedText>
+          </Pressable>
+        )}
       </View>
     );
   }
@@ -300,6 +350,10 @@ export default function WatchlistScreen() {
     const isIndex = item.key?.startsWith('NSE_INDEX') || item.key?.startsWith('BSE_INDEX');
     const segTag = isIndex ? 'INDEX' : isFO ? 'F&O' : 'EQ';
     const segColor = isFO ? '#d97706' : isIndex ? '#7c3aed' : '#2563eb';
+    const lots = item.lots ?? 1;
+    const lotSize = item.lotSize ?? 1;
+    const totalQty = lots * lotSize;
+    const showLotsBadge = lotSize > 1 || lots > 1;
     return (
       <View style={[styles.watchItem, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.watchTop}>
@@ -339,6 +393,27 @@ export default function WatchlistScreen() {
           </View>
         ) : (
           <ThemedText style={[styles.noPrice, { color: palette.muted }]}>Waiting for price data…</ThemedText>
+        )}
+        {/* Lots / qty row with inline +/- edit */}
+        {showLotsBadge && (
+          <View style={styles.lotsRow}>
+            <ThemedText style={[styles.lotsText, { color: palette.muted }]}>Lots:</ThemedText>
+            <Pressable
+              onPress={() => onUpdateLots(item.key, lots - 1)}
+              disabled={lots <= 1}
+              style={[styles.lotsStepBtn, { borderColor: palette.border, opacity: lots <= 1 ? 0.4 : 1 }]}>
+              <ThemedText style={{ fontWeight: '700' }}>−</ThemedText>
+            </Pressable>
+            <ThemedText style={{ fontWeight: '700', minWidth: 20, textAlign: 'center' }}>{lots}</ThemedText>
+            <Pressable
+              onPress={() => onUpdateLots(item.key, lots + 1)}
+              style={[styles.lotsStepBtn, { borderColor: palette.border }]}>
+              <ThemedText style={{ fontWeight: '700' }}>+</ThemedText>
+            </Pressable>
+            <ThemedText style={[styles.lotsText, { color: palette.muted }]}>
+              × {lotSize} = {totalQty} qty
+            </ThemedText>
+          </View>
         )}
       </View>
     );
@@ -552,6 +627,7 @@ const styles = StyleSheet.create({
   resultSub: { fontSize: 11, marginTop: 2 },
   addBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  lotsStepBtn: { borderWidth: 1, borderRadius: 6, width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
 
   watchItem: { borderWidth: 1, borderRadius: 14, padding: 14 },
   watchTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
@@ -568,6 +644,9 @@ const styles = StyleSheet.create({
   changeText: { fontSize: 13, fontWeight: '600' },
   absChange: { fontSize: 12 },
   noPrice: { fontSize: 12, marginTop: 6 },
+
+  lotsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  lotsText: { fontSize: 12 },
 
   errorText: { fontSize: 13, marginVertical: 6 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 14 },

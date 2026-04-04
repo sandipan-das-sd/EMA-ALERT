@@ -79,6 +79,9 @@ router.get("/", async (req, res) => {
 
       console.log(`[Watchlist] ${key}: price=${price}, changePct=${changePct}, matchedKey=${found?.key || 'none'}`);
 
+      const lots = user.watchlistLots?.get(key) ?? 1;
+      const lotSize = instrument?.lotSize ?? 1;
+
       return {
         key,
         name: instrument?.name || key.split("|")[1] || key,
@@ -89,6 +92,8 @@ router.get("/", async (req, res) => {
         changePct,
         change,
         ts,
+        lots,
+        lotSize,
       };
     });
 
@@ -106,7 +111,7 @@ router.get("/", async (req, res) => {
 // POST add instrument
 router.post("/", async (req, res) => {
   try {
-    const { instrumentKey } = req.body;
+    const { instrumentKey, lots } = req.body;
     if (!instrumentKey)
       return res.status(400).json({ message: "instrumentKey required" });
     if (allowedSet.size && !allowedSet.has(instrumentKey)) {
@@ -116,10 +121,15 @@ router.post("/", async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     if (!user.watchlist.includes(instrumentKey)) {
       user.watchlist.push(instrumentKey);
-      await user.save();
-      // Trigger dynamic subscription update
-      await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
     }
+    // Store lots preference (default 1)
+    const safeLots = Number.isInteger(Number(lots)) && Number(lots) >= 1 ? Math.round(Number(lots)) : 1;
+    user.watchlistLots = user.watchlistLots ?? new Map();
+    user.watchlistLots.set(instrumentKey, safeLots);
+    user.markModified('watchlistLots');
+    await user.save();
+    // Trigger dynamic subscription update
+    await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
     res.status(201).json({ watchlist: user.watchlist });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
@@ -133,10 +143,37 @@ router.delete("/:instrumentKey", async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
     user.watchlist = user.watchlist.filter((k) => k !== instrumentKey);
+    if (user.watchlistLots) {
+      user.watchlistLots.delete(instrumentKey);
+      user.markModified('watchlistLots');
+    }
     await user.save();
     // Trigger dynamic subscription update
     await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
     res.json({ watchlist: user.watchlist });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH update lots for an existing watchlist item
+router.patch("/:instrumentKey/lots", async (req, res) => {
+  try {
+    const { instrumentKey } = req.params;
+    const lots = Number(req.body.lots);
+    if (!Number.isInteger(lots) || lots < 1) {
+      return res.status(400).json({ message: "lots must be a positive integer" });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.watchlist.includes(instrumentKey)) {
+      return res.status(404).json({ message: "Instrument not in watchlist" });
+    }
+    user.watchlistLots = user.watchlistLots ?? new Map();
+    user.watchlistLots.set(instrumentKey, lots);
+    user.markModified('watchlistLots');
+    await user.save();
+    res.json({ instrumentKey, lots });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }
