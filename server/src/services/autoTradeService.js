@@ -1,8 +1,8 @@
 /**
  * Auto-Trade Service
- * Listens for EMA crossover signals and auto-places LIMIT BUY orders.
- * Trail SL ratchets to each subsequent 15m candle's high (never down).
- * Exits via MARKET SELL when candle low touches trailing SL.
+ * Listens for EMA crossover signals and auto-places LIMIT orders (BUY or SELL short).
+ * BUY trade: entry at sig.high, trail SL ratchets upward, exits via MARKET SELL.
+ * SELL trade: entry at sig.low (short), trail SL ratchets downward, exits via MARKET BUY.
  */
 
 const UPSTOX_V3_BASE = process.env.UPSTOX_SANDBOX === 'true'
@@ -62,7 +62,7 @@ async function getOrderDetails(accessToken, orderId) {
 
 /**
  * Called when an EMA cross signal fires.
- * Places a DAY LIMIT BUY at sig.high (entry) for the user.
+ * Places a DAY LIMIT order (BUY or SELL short) based on per-instrument direction.
  */
 async function onSignal(userId, instrumentKey, sig) {
   const tradeKey = `${userId}:${instrumentKey}`;
@@ -75,7 +75,7 @@ async function onSignal(userId, instrumentKey, sig) {
 
   try {
     const User = (await import('../models/User.js')).default;
-    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct');
+    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct watchlistDirection');
 
     if (!user?.autoTrade?.enabled) return;
     if (!user.upstoxAccessToken) {
@@ -91,16 +91,31 @@ async function onSignal(userId, instrumentKey, sig) {
     const quantity = Math.max(1, lots * lotSize);
     // Per-instrument product overrides global setting
     const product = user.watchlistProduct?.get(instrumentKey) ?? user.autoTrade.product ?? 'I';
-    const entryPrice = sig.high;
-    const initialSL = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
-    const slDistance = entryPrice - initialSL;
+    // Per-instrument direction: BUY (long) or SELL (short — intraday only)
+    const direction = (user.watchlistDirection?.get(instrumentKey) ?? 'BUY').toUpperCase();
+    const transactionType = direction === 'SELL' ? 'SELL' : 'BUY';
+
+    let entryPrice, initialSL, slDistance;
+    if (transactionType === 'BUY') {
+      // Long: enter above candle high, SL below prev candle low
+      entryPrice = sig.high;
+      initialSL = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
+      slDistance = entryPrice - initialSL;
+    } else {
+      // Short: enter below candle low, SL above prev candle high
+      entryPrice = sig.low;
+      initialSL = sig.prevCandleHigh != null ? sig.prevCandleHigh : sig.high;
+      slDistance = initialSL - entryPrice;
+    }
 
     if (slDistance <= 0) {
-      console.warn(`[AutoTrade] Invalid SL for ${instrumentKey}: entry=${entryPrice}, SL=${initialSL}`);
+      console.warn(`[AutoTrade] Invalid SL for ${instrumentKey}: entry=${entryPrice}, SL=${initialSL}, direction=${transactionType}`);
       return;
     }
 
-    const target1 = entryPrice + slDistance;
+    const target1 = transactionType === 'BUY'
+      ? entryPrice + slDistance
+      : entryPrice - slDistance;
 
     const orderData = await placeOrder(user.upstoxAccessToken, {
       quantity,
@@ -109,7 +124,7 @@ async function onSignal(userId, instrumentKey, sig) {
       price: entryPrice,
       instrument_token: instrumentKey,
       order_type: 'LIMIT',
-      transaction_type: 'BUY',
+      transaction_type: transactionType,
       disclosed_quantity: 0,
       trigger_price: 0,
       is_amo: false,
@@ -124,6 +139,7 @@ async function onSignal(userId, instrumentKey, sig) {
       instrumentKey,
       orderId,
       status: 'pending_entry',
+      transactionType,
       entryPrice,
       initialSL,
       currentTrailSL: initialSL,
@@ -137,7 +153,7 @@ async function onSignal(userId, instrumentKey, sig) {
     });
 
     console.log(
-      `[AutoTrade] 📈 LIMIT BUY placed` +
+      `[AutoTrade] 📈 LIMIT ${transactionType} placed` +
       ` | ${instrumentKey} | qty=${quantity} | entry=${entryPrice}` +
       ` | SL=${initialSL} | T1=${target1} | orderId=${orderId}`
     );
@@ -197,25 +213,48 @@ async function onCandleTick(instrumentKey, candles) {
         const candleHigh = Number(latestClosed[2]);
         const candleLow = Number(latestClosed[3]);
 
-        // Ratchet trail SL upward only
         let newTrailSL = trade.currentTrailSL;
-        if (candleHigh > newTrailSL) {
-          newTrailSL = candleHigh;
-          console.log(
-            `[AutoTrade] ↑ Trail SL for ${instrumentKey}: ${trade.currentTrailSL} → ${newTrailSL}`
-          );
-        }
 
-        const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
-        activeTrades.set(tradeKey, updatedTrade);
+        if (trade.transactionType === 'SELL') {
+          // Short trade: ratchet trail SL downward only
+          if (candleLow < newTrailSL) {
+            newTrailSL = candleLow;
+            console.log(
+              `[AutoTrade] ↓ Trail SL (SELL) for ${instrumentKey}: ${trade.currentTrailSL} → ${newTrailSL}`
+            );
+          }
 
-        // Check SL hit: candle low penetrated trail SL
-        if (candleLow <= newTrailSL) {
-          console.log(
-            `[AutoTrade] 🔴 Trail SL hit for ${instrumentKey}:` +
-            ` candle_low=${candleLow} <= trailSL=${newTrailSL}`
-          );
-          await exitTrade(tradeKey, updatedTrade);
+          const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
+          activeTrades.set(tradeKey, updatedTrade);
+
+          // Short SL hit: candle high touches or exceeds trail SL
+          if (candleHigh >= newTrailSL) {
+            console.log(
+              `[AutoTrade] 🔴 Trail SL hit (SELL) for ${instrumentKey}:` +
+              ` candle_high=${candleHigh} >= trailSL=${newTrailSL}`
+            );
+            await exitTrade(tradeKey, updatedTrade);
+          }
+        } else {
+          // Long trade (BUY): ratchet trail SL upward only
+          if (candleHigh > newTrailSL) {
+            newTrailSL = candleHigh;
+            console.log(
+              `[AutoTrade] ↑ Trail SL (BUY) for ${instrumentKey}: ${trade.currentTrailSL} → ${newTrailSL}`
+            );
+          }
+
+          const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
+          activeTrades.set(tradeKey, updatedTrade);
+
+          // Long SL hit: candle low touches or goes below trail SL
+          if (candleLow <= newTrailSL) {
+            console.log(
+              `[AutoTrade] 🔴 Trail SL hit (BUY) for ${instrumentKey}:` +
+              ` candle_low=${candleLow} <= trailSL=${newTrailSL}`
+            );
+            await exitTrade(tradeKey, updatedTrade);
+          }
         }
       }
     } catch (err) {
@@ -225,10 +264,12 @@ async function onCandleTick(instrumentKey, candles) {
 }
 
 /**
- * Place a MARKET SELL to exit the position.
+ * Place a MARKET exit order to close the position.
+ * BUY trades exit via MARKET SELL; SELL (short) trades exit via MARKET BUY.
  */
 async function exitTrade(tradeKey, trade) {
   try {
+    const exitTransactionType = trade.transactionType === 'SELL' ? 'BUY' : 'SELL';
     const orderData = await placeOrder(trade.accessToken, {
       quantity: trade.quantity,
       product: trade.product,
@@ -236,7 +277,7 @@ async function exitTrade(tradeKey, trade) {
       price: 0,
       instrument_token: trade.instrumentKey,
       order_type: 'MARKET',
-      transaction_type: 'SELL',
+      transaction_type: exitTransactionType,
       disclosed_quantity: 0,
       trigger_price: 0,
       is_amo: false,
@@ -245,7 +286,7 @@ async function exitTrade(tradeKey, trade) {
 
     const exitOrderId = orderData?.order_ids?.[0];
     console.log(
-      `[AutoTrade] ✅ Exit MARKET SELL placed for ${trade.instrumentKey}` +
+      `[AutoTrade] ✅ Exit MARKET ${exitTransactionType} placed for ${trade.instrumentKey}` +
       ` | orderId=${exitOrderId}`
     );
     activeTrades.delete(tradeKey);

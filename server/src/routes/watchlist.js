@@ -82,6 +82,7 @@ router.get("/", async (req, res) => {
       const lots = user.watchlistLots?.get(key) ?? 1;
       const lotSize = instrument?.lotSize ?? 1;
       const product = user.watchlistProduct?.get(key) ?? 'I';
+      const direction = user.watchlistDirection?.get(key) ?? 'BUY';
 
       return {
         key,
@@ -96,6 +97,7 @@ router.get("/", async (req, res) => {
         lots,
         lotSize,
         product,
+        direction,
       };
     });
 
@@ -113,7 +115,7 @@ router.get("/", async (req, res) => {
 // POST add instrument
 router.post("/", async (req, res) => {
   try {
-    const { instrumentKey, lots, product } = req.body;
+    const { instrumentKey, lots, product, direction } = req.body;
     if (!instrumentKey)
       return res.status(400).json({ message: "instrumentKey required" });
     if (allowedSet.size && !allowedSet.has(instrumentKey)) {
@@ -129,11 +131,16 @@ router.post("/", async (req, res) => {
     user.watchlistLots = user.watchlistLots ?? new Map();
     user.watchlistLots.set(instrumentKey, safeLots);
     user.markModified('watchlistLots');
-    // Store product preference (default 'I')
-    const safeProduct = product === 'D' ? 'D' : 'I';
+    // Store product preference: 'I' = Intraday, 'D' = Delivery, 'MTF' = Margin Trading
+    const safeProduct = ['D', 'MTF'].includes(product) ? product : 'I';
     user.watchlistProduct = user.watchlistProduct ?? new Map();
     user.watchlistProduct.set(instrumentKey, safeProduct);
     user.markModified('watchlistProduct');
+    // Store direction: 'BUY' or 'SELL' (SELL only meaningful for Intraday)
+    const safeDirection = direction === 'SELL' ? 'SELL' : 'BUY';
+    user.watchlistDirection = user.watchlistDirection ?? new Map();
+    user.watchlistDirection.set(instrumentKey, safeDirection);
+    user.markModified('watchlistDirection');
     await user.save();
     // Trigger dynamic subscription update
     await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
@@ -157,6 +164,10 @@ router.delete("/:instrumentKey", async (req, res) => {
     if (user.watchlistProduct) {
       user.watchlistProduct.delete(instrumentKey);
       user.markModified('watchlistProduct');
+    }
+    if (user.watchlistDirection) {
+      user.watchlistDirection.delete(instrumentKey);
+      user.markModified('watchlistDirection');
     }
     await user.save();
     // Trigger dynamic subscription update
@@ -194,7 +205,7 @@ router.patch("/:instrumentKey/lots", async (req, res) => {
 router.patch("/:instrumentKey/product", async (req, res) => {
   try {
     const { instrumentKey } = req.params;
-    const product = req.body.product === 'D' ? 'D' : 'I';
+    const product = ['D', 'MTF'].includes(req.body.product) ? req.body.product : 'I';
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
     if (!user.watchlist.includes(instrumentKey)) {
@@ -205,6 +216,26 @@ router.patch("/:instrumentKey/product", async (req, res) => {
     user.markModified('watchlistProduct');
     await user.save();
     res.json({ instrumentKey, product });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH update direction for an existing watchlist item
+router.patch("/:instrumentKey/direction", async (req, res) => {
+  try {
+    const { instrumentKey } = req.params;
+    const direction = req.body.direction === 'SELL' ? 'SELL' : 'BUY';
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.watchlist.includes(instrumentKey)) {
+      return res.status(404).json({ message: "Instrument not in watchlist" });
+    }
+    user.watchlistDirection = user.watchlistDirection ?? new Map();
+    user.watchlistDirection.set(instrumentKey, direction);
+    user.markModified('watchlistDirection');
+    await user.save();
+    res.json({ instrumentKey, direction });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }

@@ -538,6 +538,7 @@ export function startAlertEngine({
         );
         
         const prevCandleLow = idx > 0 ? Number(sortedCandles[idx - 1][3]) : low;
+        const prevCandleHigh = idx > 0 ? Number(sortedCandles[idx - 1][2]) : high;
 
         signals.push({
           ts: candleStartTs,
@@ -547,6 +548,7 @@ export function startAlertEngine({
           close,
           ema: emaOpenEffective,
           prevCandleLow,
+          prevCandleHigh,
           crossDetectedAt, // Add detection timestamp
           candleEndTime, // Add candle close time for delay tracking
         });

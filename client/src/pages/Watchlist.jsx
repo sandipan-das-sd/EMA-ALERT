@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { getWatchlist, removeFromWatchlist, updateWatchlistLots, updateWatchlistProduct } from "../lib/api.js";
+import { getWatchlist, removeFromWatchlist, updateWatchlistLots, updateWatchlistProduct, updateWatchlistDirection } from "../lib/api.js";
 import Sidebar from "../components/Sidebar.jsx";
 import MarketClock from "../components/MarketClock.jsx";
 import {
@@ -178,6 +178,15 @@ export default function Watchlist({ user, setUser }) {
     }
   }
 
+  async function onUpdateDirection(key, newDirection) {
+    try {
+      await updateWatchlistDirection(key, newDirection);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, direction: newDirection } : it));
+    } catch (error) {
+      console.error("Error updating direction:", error);
+    }
+  }
+
   function openChart(item) {
     console.log("[Watchlist] Opening chart for item:", item);
 
@@ -292,6 +301,7 @@ export default function Watchlist({ user, setUser }) {
                   const totalQty = lots * lotSize;
                   const showLots = lotSize > 1 || lots > 1;
                   const product = item.product ?? 'I';
+                  const direction = item.direction ?? 'BUY';
                   return (
                     <div
                       className="flex items-center gap-3 flex-wrap"
@@ -313,6 +323,7 @@ export default function Watchlist({ user, setUser }) {
                           <span className="text-xs text-gray-400">{lotSize > 1 ? `× ${lotSize} = ${totalQty} qty` : 'qty'}</span>
                         </div>
                       )}
+                      {/* Product toggle: Intraday / Delivery / MTF */}
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => onUpdateProduct(item.key, 'I')}
@@ -330,6 +341,37 @@ export default function Watchlist({ user, setUser }) {
                               : 'text-gray-500 border-gray-300 hover:bg-gray-50'
                           }`}
                         >Delivery</button>
+                        <button
+                          onClick={() => onUpdateProduct(item.key, 'MTF')}
+                          className={`text-xs px-2 py-0.5 rounded border font-semibold transition ${
+                            product === 'MTF'
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'text-gray-500 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >MTF</button>
+                      </div>
+                      {/* Direction toggle: BUY / SELL (SELL only for Intraday) */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onUpdateDirection(item.key, 'BUY')}
+                          className={`text-xs px-2 py-0.5 rounded border font-semibold transition ${
+                            direction === 'BUY'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'text-gray-500 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >BUY</button>
+                        <button
+                          onClick={() => product === 'I' && onUpdateDirection(item.key, 'SELL')}
+                          disabled={product !== 'I'}
+                          title={product !== 'I' ? 'Short selling only available for Intraday' : ''}
+                          className={`text-xs px-2 py-0.5 rounded border font-semibold transition ${
+                            direction === 'SELL'
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : product !== 'I'
+                                ? 'text-gray-300 border-gray-200 cursor-not-allowed'
+                                : 'text-gray-500 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >SELL</button>
                       </div>
                     </div>
                   );

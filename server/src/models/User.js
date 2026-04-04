@@ -64,8 +64,14 @@ const userSchema = new mongoose.Schema(
       of: Number,
       default: {},
     },
-    // Per-instrument product preference: 'I' = Intraday, 'D' = Delivery
+    // Per-instrument product preference: 'I' = Intraday, 'D' = Delivery, 'MTF' = Margin Trading
     watchlistProduct: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    // Per-instrument trade direction: 'BUY' or 'SELL' (SELL only valid for Intraday)
+    watchlistDirection: {
       type: Map,
       of: String,
       default: {},
@@ -74,7 +80,7 @@ const userSchema = new mongoose.Schema(
     autoTrade: {
       enabled: { type: Boolean, default: false },
       quantity: { type: Number, default: 1, min: 1 },
-      product: { type: String, enum: ['I', 'D'], default: 'I' },
+      product: { type: String, enum: ['I', 'D', 'MTF'], default: 'I' },
     },
     notes: [{
       title: {

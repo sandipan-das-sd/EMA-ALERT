@@ -61,8 +61,8 @@ export async function getWatchlist() {
   return data.watchlist || [];
 }
 
-export async function addToWatchlist(instrumentKey, lots = 1, product = 'I') {
-  const data = await request('/api/watchlist', { method: 'POST', body: { instrumentKey, lots, product } });
+export async function addToWatchlist(instrumentKey, lots = 1, product = 'I', direction = 'BUY') {
+  const data = await request('/api/watchlist', { method: 'POST', body: { instrumentKey, lots, product, direction } });
   return data.watchlist || [];
 }
 
@@ -73,6 +73,11 @@ export async function updateWatchlistLots(instrumentKey, lots) {
 
 export async function updateWatchlistProduct(instrumentKey, product) {
   const data = await request(`/api/watchlist/${encodeURIComponent(instrumentKey)}/product`, { method: 'PATCH', body: { product } });
+  return data;
+}
+
+export async function updateWatchlistDirection(instrumentKey, direction) {
+  const data = await request(`/api/watchlist/${encodeURIComponent(instrumentKey)}/direction`, { method: 'PATCH', body: { direction } });
   return data;
 }
 
