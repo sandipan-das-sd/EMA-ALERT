@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { getWatchlist, removeFromWatchlist, updateWatchlistLots } from "../lib/api.js";
+import { getWatchlist, removeFromWatchlist, updateWatchlistLots, updateWatchlistProduct } from "../lib/api.js";
 import Sidebar from "../components/Sidebar.jsx";
 import MarketClock from "../components/MarketClock.jsx";
 import {
@@ -169,6 +169,15 @@ export default function Watchlist({ user, setUser }) {
     }
   }
 
+  async function onUpdateProduct(key, newProduct) {
+    try {
+      await updateWatchlistProduct(key, newProduct);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, product: newProduct } : it));
+    } catch (error) {
+      console.error("Error updating product:", error);
+    }
+  }
+
   function openChart(item) {
     console.log("[Watchlist] Opening chart for item:", item);
 
@@ -282,25 +291,48 @@ export default function Watchlist({ user, setUser }) {
                   const lotSize = item.lotSize ?? 1;
                   const totalQty = lots * lotSize;
                   const showLots = lotSize > 1 || lots > 1;
-                  return showLots ? (
+                  const product = item.product ?? 'I';
+                  return (
                     <div
-                      className="flex items-center gap-2"
+                      className="flex items-center gap-3 flex-wrap"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <span className="text-xs text-gray-500">Lots:</span>
-                      <button
-                        className="w-6 h-6 rounded border text-sm font-bold leading-none hover:bg-gray-100"
-                        onClick={() => onUpdateLots(item.key, lots - 1)}
-                        disabled={lots <= 1}
-                      >−</button>
-                      <span className="text-sm font-semibold tabular-nums w-6 text-center">{lots}</span>
-                      <button
-                        className="w-6 h-6 rounded border text-sm font-bold leading-none hover:bg-gray-100"
-                        onClick={() => onUpdateLots(item.key, lots + 1)}
-                      >+</button>
-                      <span className="text-xs text-gray-400">{lotSize > 1 ? `× ${lotSize} = ${totalQty} qty` : `qty`}</span>
+                      {showLots && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-gray-500">Lots:</span>
+                          <button
+                            className="w-6 h-6 rounded border text-sm font-bold leading-none hover:bg-gray-100 disabled:opacity-40"
+                            onClick={() => onUpdateLots(item.key, lots - 1)}
+                            disabled={lots <= 1}
+                          >−</button>
+                          <span className="text-sm font-semibold tabular-nums w-6 text-center">{lots}</span>
+                          <button
+                            className="w-6 h-6 rounded border text-sm font-bold leading-none hover:bg-gray-100"
+                            onClick={() => onUpdateLots(item.key, lots + 1)}
+                          >+</button>
+                          <span className="text-xs text-gray-400">{lotSize > 1 ? `× ${lotSize} = ${totalQty} qty` : 'qty'}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onUpdateProduct(item.key, 'I')}
+                          className={`text-xs px-2 py-0.5 rounded border font-semibold transition ${
+                            product === 'I'
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'text-gray-500 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >Intraday</button>
+                        <button
+                          onClick={() => onUpdateProduct(item.key, 'D')}
+                          className={`text-xs px-2 py-0.5 rounded border font-semibold transition ${
+                            product === 'D'
+                              ? 'bg-green-600 text-white border-green-600'
+                              : 'text-gray-500 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >Delivery</button>
+                      </div>
                     </div>
-                  ) : null;
+                  );
                 })()}
                 <div className="flex items-baseline gap-3">
                   <span
