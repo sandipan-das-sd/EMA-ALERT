@@ -5,8 +5,12 @@
  * Exits via MARKET SELL when candle low touches trailing SL.
  */
 
-const UPSTOX_V3_BASE = 'https://api-hft.upstox.com/v3';
-const UPSTOX_V2_BASE = 'https://api.upstox.com/v2';
+const UPSTOX_V3_BASE = process.env.UPSTOX_SANDBOX === 'true'
+  ? 'https://api-sandbox.upstox.com/v3'
+  : 'https://api-hft.upstox.com/v3';
+const UPSTOX_V2_BASE = process.env.UPSTOX_SANDBOX === 'true'
+  ? 'https://api-sandbox.upstox.com/v2'
+  : 'https://api.upstox.com/v2';
 
 // Map: `${userId}:${instrumentKey}` -> TradeState
 const activeTrades = new Map();
