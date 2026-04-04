@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,7 +8,13 @@ import { Colors } from "@/constants/theme";
 import { useAlertContext } from "@/contexts/alert-context";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { registerPushToken, sendPushTest } from "@/lib/api";
+import {
+  getAutoTradeSettings,
+  registerPushToken,
+  sendPushTest,
+  updateAutoTradeSettings,
+  type AutoTradeSettings,
+} from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { requestPushPermissions } from "@/services/push-notification-service";
 
@@ -63,6 +69,41 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [pushTestLoading, setPushTestLoading] = useState(false);
+
+  // Auto-trade settings state
+  const [autoTrade, setAutoTrade] = useState<AutoTradeSettings>({ enabled: false, quantity: 1, product: 'I' });
+  const [atLoading, setAtLoading] = useState(false);
+  const [atMessage, setAtMessage] = useState("");
+  const [quantityStr, setQuantityStr] = useState("1");
+
+  useEffect(() => {
+    getAutoTradeSettings()
+      .then((s) => {
+        setAutoTrade(s);
+        setQuantityStr(String(s.quantity));
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleAutoTradeUpdate = useCallback(async (patch: Partial<AutoTradeSettings>) => {
+    const next = { ...autoTrade, ...patch };
+    setAutoTrade(next);
+    setAtLoading(true);
+    setAtMessage("");
+    try {
+      const saved = await updateAutoTradeSettings(patch);
+      setAutoTrade(saved);
+      setQuantityStr(String(saved.quantity));
+      setAtMessage("Saved");
+      setTimeout(() => setAtMessage(""), 2000);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to save auto-trade settings");
+      // Revert optimistic update
+      setAutoTrade(autoTrade);
+    } finally {
+      setAtLoading(false);
+    }
+  }, [autoTrade]);
 
   async function handleTokenUpdate() {
     if (!upstoxToken.trim()) return;
@@ -179,6 +220,63 @@ export default function SettingsScreen() {
             dispatch({ type: "SET_PREFERENCES", payload: { pushNotificationsEnabled: value } })
           }
         />
+      </ThemedView>
+
+      <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 
+        <ThemedText type="defaultSemiBold">Auto-Trade (EMA Signal)</ThemedText>
+        <ThemedText style={{ color: palette.muted, fontSize: 12, lineHeight: 18 }}>
+          When an EMA cross alert fires, automatically place a LIMIT BUY at the candle high.
+          Trailing SL ratchets to each 15m candle's high. Exits via MARKET SELL when price hits trail SL.
+        </ThemedText>
+
+        {atMessage ? <ThemedText style={{ color: palette.success, fontWeight: "700" }}>{atMessage}</ThemedText> : null}
+
+        <ToggleRow
+          label="Enable Auto-Trade"
+          hint="Place orders automatically on every signal"
+          value={autoTrade.enabled}
+          onValueChange={(v) => handleAutoTradeUpdate({ enabled: v })}
+        />
+
+        <View style={{ gap: 6 }}>
+          <ThemedText style={{ fontSize: 13, fontWeight: "600" }}>Quantity per Trade</ThemedText>
+          <TextInput
+            value={quantityStr}
+            onChangeText={setQuantityStr}
+            onBlur={() => {
+              const q = parseInt(quantityStr, 10);
+              if (Number.isFinite(q) && q >= 1) {
+                handleAutoTradeUpdate({ quantity: q });
+              } else {
+                setQuantityStr(String(autoTrade.quantity));
+              }
+            }}
+            keyboardType="numeric"
+            editable={!atLoading}
+            placeholderTextColor={palette.muted}
+            style={[styles.input, { color: palette.text, borderColor: palette.border }]}
+          />
+        </View>
+
+        <View style={{ gap: 6 }}>
+          <ThemedText style={{ fontSize: 13, fontWeight: "600" }}>Product Type</ThemedText>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {(['I', 'D'] as const).map((p) => (
+              <Pressable
+                key={p}
+                onPress={() => handleAutoTradeUpdate({ product: p })}
+                style={[
+                  styles.secondaryBtn,
+                  { flex: 1, borderColor: autoTrade.product === p ? palette.accent : palette.border,
+                    backgroundColor: autoTrade.product === p ? palette.accent + '22' : palette.background },
+                ]}>
+                <ThemedText style={{ color: autoTrade.product === p ? palette.accent : palette.text, fontWeight: "700" }}>
+                  {p === 'I' ? 'MIS (Intraday)' : 'CNC (Delivery)'}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </View>
+        </View>
       </ThemedView>
 
       <ThemedView style={[styles.card, { backgroundColor: palette.card, borderColor: palette.border }]}> 

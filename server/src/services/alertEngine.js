@@ -4,6 +4,7 @@ import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotificati
 import { enqueueBufferedVoiceAlert } from "./voiceNotification.js";
 import { sendPushAlertToUser } from "./pushNotification.js";
 import { sendAlertEmailToUser } from "./emailNotification.js";
+import { autoTradeService } from "./autoTradeService.js";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -536,6 +537,8 @@ export function startAlertEngine({
           `   ⏱️  Detection delay: ${delayFromCandleClose}s from candle close`
         );
         
+        const prevCandleLow = idx > 0 ? Number(sortedCandles[idx - 1][3]) : low;
+
         signals.push({
           ts: candleStartTs,
           open,
@@ -543,6 +546,7 @@ export function startAlertEngine({
           low,
           close,
           ema: emaOpenEffective,
+          prevCandleLow,
           crossDetectedAt, // Add detection timestamp
           candleEndTime, // Add candle close time for delay tracking
         });
@@ -695,7 +699,12 @@ export function startAlertEngine({
                 if (signals && signals.length > 0) {
                   keyToSignal.set(origKey, signals);
                 }
-                
+
+                // Auto-trade: monitor active trades on every candle tick
+                autoTradeService.onCandleTick(origKey, data).catch((err) =>
+                  console.error(`[AutoTrade] Tick error for ${origKey}:`, err.message)
+                );
+
                 successfulKeys.add(origKey);
               } else if (!failedKeys.has(origKey) && !successfulKeys.has(origKey)) {
                 failedKeys.set(origKey, `No candles returned`);
@@ -793,6 +802,11 @@ export function startAlertEngine({
                       notificationSentAt,
                       createdAt: new Date().toISOString(),
                     });
+
+                    // Auto-trade: place entry order (non-blocking)
+                    autoTradeService.onSignal(userId, instrumentKey, sig).catch((err) =>
+                      console.error(`[AutoTrade] Signal error for ${instrumentKey}:`, err.message)
+                    );
                     
                     // Send WhatsApp notification IMMEDIATELY (non-blocking)
                     if (whatsappNumbers.length > 0) {

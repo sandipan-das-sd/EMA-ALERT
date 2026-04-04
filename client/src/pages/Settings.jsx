@@ -1,11 +1,37 @@
-import React, { useState } from 'react';
-import { updateUpstoxToken } from '../lib/api.js';
+import React, { useEffect, useState } from 'react';
+import { getAutoTradeSettings, updateAutoTradeSettings, updateUpstoxToken } from '../lib/api.js';
 
 export default function Settings() {
   const [upstoxAccessToken, setUpstoxAccessToken] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Auto-trade settings
+  const [autoTrade, setAutoTrade] = useState({ enabled: false, quantity: 1, product: 'I' });
+  const [atLoading, setAtLoading] = useState(false);
+  const [atMessage, setAtMessage] = useState('');
+  const [atError, setAtError] = useState('');
+
+  useEffect(() => {
+    getAutoTradeSettings().then(setAutoTrade).catch(() => {});
+  }, []);
+
+  async function handleAutoTradeSubmit(e) {
+    e.preventDefault();
+    setAtLoading(true);
+    setAtMessage('');
+    setAtError('');
+    try {
+      const saved = await updateAutoTradeSettings(autoTrade);
+      setAutoTrade(saved);
+      setAtMessage('Auto-trade settings saved.');
+    } catch (err) {
+      setAtError(err.message || 'Failed to save settings');
+    } finally {
+      setAtLoading(false);
+    }
+  }
 
   async function handleUpdateToken(e) {
     e.preventDefault();
@@ -28,9 +54,76 @@ export default function Settings() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Settings</h1>
-      
+    <div className="container mx-auto px-4 py-8 space-y-6">
+      <h1 className="text-3xl font-bold">Settings</h1>
+
+      {/* ---- Auto-Trade Settings ---- */}
+      <div className="card max-w-2xl">
+        <h2 className="text-xl font-semibold mb-1">Auto-Trade (EMA Signal)</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          When an EMA 20 cross fires, automatically place a DAY LIMIT BUY at the signal candle's high.
+          Stop-loss = previous candle's low. Trailing SL ratchets to each 15m candle's high and exits via MARKET SELL when price hits trail SL.
+          Requires a valid Upstox token.
+        </p>
+
+        {atMessage && <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">{atMessage}</div>}
+        {atError && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{atError}</div>}
+
+        <form onSubmit={handleAutoTradeSubmit} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="block text-sm font-medium">Enable Auto-Trade</label>
+              <span className="text-xs text-slate-500">Place orders automatically on every EMA signal</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={autoTrade.enabled}
+                onChange={(e) => setAutoTrade(p => ({ ...p, enabled: e.target.checked }))}
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Quantity per Trade</label>
+            <input
+              type="number"
+              min="1"
+              className="input w-32"
+              value={autoTrade.quantity}
+              onChange={(e) => setAutoTrade(p => ({ ...p, quantity: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Product Type</label>
+            <div className="flex gap-2">
+              {[{ value: 'I', label: 'MIS (Intraday)' }, { value: 'D', label: 'CNC (Delivery)' }].map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setAutoTrade(p => ({ ...p, product: value }))}
+                  className={`px-4 py-2 rounded border text-sm font-medium transition-colors ${
+                    autoTrade.product === value
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button type="submit" className="btn-primary" disabled={atLoading}>
+            {atLoading ? 'Saving...' : 'Save Auto-Trade Settings'}
+          </button>
+        </form>
+      </div>
+
+      {/* ---- Upstox Token ---- */}
       <div className="card max-w-2xl">
         <h2 className="text-xl font-semibold mb-4">Upstox Configuration</h2>
         <p className="text-sm text-slate-600 mb-4">

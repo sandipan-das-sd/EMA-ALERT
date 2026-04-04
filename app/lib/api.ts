@@ -338,6 +338,26 @@ export async function searchInstruments(query: string, options: { segments?: str
   return (data?.results || []) as InstrumentSearchItem[];
 }
 
+// Auto-trade settings
+export interface AutoTradeSettings {
+  enabled: boolean;
+  quantity: number;
+  product: 'I' | 'D';
+}
+
+export async function getAutoTradeSettings(): Promise<AutoTradeSettings> {
+  const data = await request('/auth/autotrade');
+  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+}
+
+export async function updateAutoTradeSettings(settings: Partial<AutoTradeSettings>): Promise<AutoTradeSettings> {
+  const data = await request('/auth/autotrade', {
+    method: 'PUT',
+    body: settings,
+  });
+  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+}
+
 export async function searchOptionContracts(filters: OptionSearchFilters = {}) {
   const params = new URLSearchParams();
 

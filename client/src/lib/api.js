@@ -144,3 +144,14 @@ export async function dismissAlert(id) {
   const data = await request(`/api/alerts/${encodeURIComponent(id)}/dismiss`, { method: 'PATCH' });
   return data.alert || null;
 }
+
+// Auto-trade settings
+export async function getAutoTradeSettings() {
+  const data = await request('/api/auth/autotrade');
+  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+}
+
+export async function updateAutoTradeSettings(settings) {
+  const data = await request('/api/auth/autotrade', { method: 'PUT', body: settings });
+  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+}

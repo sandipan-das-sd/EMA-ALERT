@@ -58,6 +58,12 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Auto-trade configuration
+    autoTrade: {
+      enabled: { type: Boolean, default: false },
+      quantity: { type: Number, default: 1, min: 1 },
+      product: { type: String, enum: ['I', 'D'], default: 'I' },
+    },
     notes: [{
       title: {
         type: String,

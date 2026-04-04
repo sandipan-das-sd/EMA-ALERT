@@ -569,8 +569,43 @@ router.get('/me', async (req, res) => {
       User.findById(decoded.id).select('+upstoxAccessToken').then((user) => {
         if (!user) return res.status(200).json({ user: null });
         if (user.isActive === false) return res.status(200).json({ user: null });
-        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive } });
+        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive, autoTrade: user.autoTrade || { enabled: false, quantity: 1, product: 'I' } } });
     });
+  });
+});
+
+// GET /api/auth/autotrade — return current auto-trade settings
+router.get('/autotrade', async (req, res) => {
+  const { user, status, message } = await getAuthenticatedUser(req);
+  if (!user) return res.status(status).json({ message });
+  res.json({
+    autoTrade: user.autoTrade || { enabled: false, quantity: 1, product: 'I' },
+  });
+});
+
+// PUT /api/auth/autotrade — update auto-trade settings
+router.put('/autotrade', async (req, res) => {
+  const { user, status, message } = await getAuthenticatedUser(req);
+  if (!user) return res.status(status).json({ message });
+
+  const { enabled, quantity, product } = req.body;
+
+  const update = {};
+  if (typeof enabled === 'boolean') update['autoTrade.enabled'] = enabled;
+  if (Number.isFinite(Number(quantity)) && Number(quantity) >= 1) {
+    update['autoTrade.quantity'] = Math.floor(Number(quantity));
+  }
+  if (product === 'I' || product === 'D') update['autoTrade.product'] = product;
+
+  if (Object.keys(update).length === 0) {
+    return res.status(400).json({ message: 'No valid fields to update' });
+  }
+
+  await User.findByIdAndUpdate(user._id, { $set: update });
+  const updated = await User.findById(user._id);
+  res.json({
+    message: 'Auto-trade settings updated',
+    autoTrade: updated.autoTrade,
   });
 });
 
