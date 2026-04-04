@@ -9,6 +9,7 @@ import Notes from './pages/Notes.jsx';
 import Notifications from './pages/Notifications.jsx';
 import Settings from './pages/Settings.jsx';
 import Logs from './pages/Logs.jsx';
+import Portfolio from './pages/Portfolio.jsx';
 import { getMe } from './lib/api.js';
 import { AlertProvider } from './contexts/AlertContext.jsx';
 
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/dashboard" element={user ? <Dashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
         <Route path="/watchlist" element={user ? <Watchlist user={user} setUser={setUser} /> : <Navigate to="/" />} />
         <Route path="/notes" element={user ? <Notes /> : <Navigate to="/" />} />
+        <Route path="/portfolio" element={user ? <Portfolio user={user} /> : <Navigate to="/" />} />
         <Route path="/notifications" element={user ? <Notifications /> : <Navigate to="/" />} />
         <Route path="/logs" element={user ? <Logs /> : <Navigate to="/" />} />
         <Route path="/settings" element={user ? <Settings /> : <Navigate to="/" />} />

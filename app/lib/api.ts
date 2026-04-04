@@ -396,3 +396,95 @@ export async function getOptionUnderlyings(options: { segment?: string; debug?: 
   const data = await request(`/instruments/options/underlyings?${params.toString()}`);
   return data as OptionUnderlyingMeta;
 }
+
+// Portfolio API helpers
+export interface PortfolioFunds {
+  equity?: {
+    used_margin?: number;
+    payin_amount?: number;
+    span_margin?: number;
+    adhoc_margin?: number;
+    notional_cash?: number;
+    available_margin?: number;
+    exposure_margin?: number;
+  };
+  commodity?: Record<string, number>;
+}
+
+export interface PortfolioOrder {
+  order_id: string;
+  trading_symbol: string;
+  transaction_type: string;
+  quantity: number;
+  filled_quantity?: number;
+  price: number;
+  average_price?: number;
+  status: string;
+  order_type: string;
+  product: string;
+  order_timestamp?: string;
+  exchange_order_id?: string;
+  exchange?: string;
+  validity?: string;
+  trigger_price?: number;
+  disclosed_quantity?: number;
+  status_message?: string;
+}
+
+export interface PortfolioPosition {
+  trading_symbol: string;
+  exchange: string;
+  instrument_token?: string;
+  product: string;
+  quantity: number;
+  buy_quantity?: number;
+  sell_quantity?: number;
+  buy_price?: number;
+  sell_price?: number;
+  buy_value?: number;
+  sell_value?: number;
+  day_buy_quantity?: number;
+  day_sell_quantity?: number;
+  day_buy_price?: number;
+  day_sell_price?: number;
+  day_buy_value?: number;
+  day_sell_value?: number;
+  realised_profit?: number;
+  unrealised_profit?: number;
+  pnl?: number;
+  close_price?: number;
+  last_price?: number;
+}
+
+export interface PortfolioHolding {
+  trading_symbol: string;
+  exchange: string;
+  isin?: string;
+  cnc_used_quantity?: number;
+  quantity: number;
+  t1_quantity?: number;
+  average_price: number;
+  last_price?: number;
+  pnl?: number;
+  product?: string;
+}
+
+export async function getPortfolioFunds(): Promise<PortfolioFunds> {
+  const data = await request('/portfolio/funds');
+  return (data?.data ?? {}) as PortfolioFunds;
+}
+
+export async function getPortfolioOrders(): Promise<PortfolioOrder[]> {
+  const data = await request('/portfolio/orders');
+  return (data?.data ?? []) as PortfolioOrder[];
+}
+
+export async function getPortfolioPositions(): Promise<PortfolioPosition[]> {
+  const data = await request('/portfolio/positions');
+  return (data?.data ?? []) as PortfolioPosition[];
+}
+
+export async function getPortfolioHoldings(): Promise<PortfolioHolding[]> {
+  const data = await request('/portfolio/holdings');
+  return (data?.data ?? []) as PortfolioHolding[];
+}

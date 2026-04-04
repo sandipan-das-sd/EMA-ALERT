@@ -155,3 +155,25 @@ export async function updateAutoTradeSettings(settings) {
   const data = await request('/api/auth/autotrade', { method: 'PUT', body: settings });
   return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
 }
+
+// ---- Portfolio APIs ----
+
+export async function getPortfolioFunds() {
+  const data = await request('/api/portfolio/funds');
+  return data?.data ?? null;
+}
+
+export async function getPortfolioOrders() {
+  const data = await request('/api/portfolio/orders');
+  return data?.data ?? [];
+}
+
+export async function getPortfolioPositions() {
+  const data = await request('/api/portfolio/positions');
+  return data?.data ?? [];
+}
+
+export async function getPortfolioHoldings() {
+  const data = await request('/api/portfolio/holdings');
+  return data?.data ?? [];
+}

@@ -13,6 +13,8 @@ import instrumentsRouter from './routes/instruments.js';
 import alertsRouter from './routes/alerts.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
+import portfolioRouter from './routes/portfolio.js';
+import { initPortfolioStream, openForUser as openPortfolioStream, clientUserMap as portfolioClientUserMap } from './services/portfolioStreamService.js';
 import { createUpstoxFeed } from './services/upstoxFeed.js';
 import { startUpstoxPoller } from './services/upstoxPoller.js';
 import { instrumentsSearchService } from './services/instrumentsSearch.js';
@@ -124,6 +126,7 @@ app.use('/api/notes', notesRouter);
 app.use('/api/instruments', instrumentsRouter);
 app.use('/api/alerts', alertsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/portfolio', portfolioRouter);
 app.use('/voice', voiceRouter);
 
 const PORT = process.env.PORT || 4000;
@@ -798,6 +801,9 @@ feed.on('error', (err) => {
       }
     });
 
+    // Initialize portfolio stream service with the shared wss
+    initPortfolioStream(wss);
+
     wss.on('connection', (socket) => {
       // Limit concurrent WebSocket connections to prevent resource exhaustion
       const currentConnections = wss.clients.size;
@@ -836,8 +842,23 @@ feed.on('error', (err) => {
       socket.on('error', (err) => {
         console.error('[WebSocket] Socket error:', err.message);
       });
-      
+
+      // Handle messages from client (e.g. identify for portfolio stream)
+      socket.on('message', (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+          if (msg.type === 'identify' && msg.userId) {
+            portfolioClientUserMap.set(socket, msg.userId);
+            // Open upstream portfolio WebSocket for this user if not already open
+            User.findById(msg.userId).select('+upstoxAccessToken').then((user) => {
+              if (user?.upstoxAccessToken) openPortfolioStream(msg.userId, user.upstoxAccessToken);
+            }).catch(() => {});
+          }
+        } catch {}
+      });
+
       socket.on('close', () => {
+        portfolioClientUserMap.delete(socket);
         console.log(`[WebSocket] Connection closed (${wss.clients.size} remaining)`);
       });
     });

@@ -20,6 +20,7 @@ export default function Sidebar() {
       <nav className="space-y-2">
         {item('/dashboard', 'Dashboard')}
         {item('/watchlist', 'Watchlist')}
+        {item('/portfolio', 'Portfolio')}
         {item('/notes', 'Notes')}
         {item('/notifications', 'Notifications')}
         {item('/logs', 'Logs')}
