@@ -14,6 +14,7 @@ import alertsRouter from './routes/alerts.js';
 import voiceRouter from './routes/voice.js';
 import adminRouter from './routes/admin.js';
 import portfolioRouter from './routes/portfolio.js';
+import marginRouter from './routes/margin.js';
 import { initPortfolioStream, openForUser as openPortfolioStream, clientUserMap as portfolioClientUserMap } from './services/portfolioStreamService.js';
 import { createUpstoxFeed } from './services/upstoxFeed.js';
 import { startUpstoxPoller } from './services/upstoxPoller.js';
@@ -127,6 +128,7 @@ app.use('/api/instruments', instrumentsRouter);
 app.use('/api/alerts', alertsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/portfolio', portfolioRouter);
+app.use('/api/margin', marginRouter);
 app.use('/voice', voiceRouter);
 
 const PORT = process.env.PORT || 4000;

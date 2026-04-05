@@ -317,6 +317,37 @@ export async function removeFromWatchlist(instrumentKey: string) {
   return (data?.watchlist || []) as string[];
 }
 
+export interface MarginInstrument {
+  instrument_key: string;
+  quantity: number;
+  product: 'I' | 'D' | 'CO' | 'MTF';
+  transaction_type: 'BUY' | 'SELL';
+  price?: number;
+}
+
+export interface MarginResult {
+  required_margin: number;
+  final_margin: number;
+  margins: {
+    equity_margin: number;
+    total_margin: number;
+    span_margin: number;
+    exposure_margin: number;
+    net_buy_premium: number;
+    additional_margin: number;
+    tender_margin: number;
+  }[];
+}
+
+export async function getMargin(instruments: MarginInstrument[]): Promise<MarginResult | null> {
+  try {
+    const data = await request('/margin', { method: 'POST', body: { instruments } });
+    return data as MarginResult;
+  } catch {
+    return null;
+  }
+}
+
 export async function getAlerts(params: { status?: "active" | "dismissed"; since?: number; limit?: number } = {}) {
   const qp = new URLSearchParams();
   if (params.status) qp.set("status", params.status);

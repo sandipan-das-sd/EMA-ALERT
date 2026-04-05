@@ -16,6 +16,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   addToWatchlist,
+  getMargin,
   getOptionFilterMeta,
   getOptionUnderlyings,
   getWatchlist,
@@ -26,6 +27,7 @@ import {
   updateWatchlistProduct,
   updateWatchlistDirection,
   type InstrumentSearchItem,
+  type MarginResult,
   type OptionFilterMeta,
   type WatchlistItem,
 } from '@/lib/api';
@@ -54,7 +56,13 @@ export default function WatchlistScreen() {
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lots picker state: when user taps "+ Add", we ask how many lots + product + direction before confirming
-  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL' } | null>(null);
+  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; lotSize: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL' } | null>(null);
+  // Margin estimate for the current picker selection
+  const [pickerMargin, setPickerMargin] = useState<MarginResult | null>(null);
+  const [pickerMarginLoading, setPickerMarginLoading] = useState(false);
+  const pickerMarginTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-instrument required margin cache (instrumentKey → total_margin in ₹)
+  const [marginMap, setMarginMap] = useState<Map<string, number>>(new Map());
 
   // Stock search state
   const [stockQuery, setStockQuery] = useState('');
@@ -88,6 +96,24 @@ export default function WatchlistScreen() {
       const wl = await getWatchlist();
       setItems(wl);
       setError('');
+      // Fetch required margin for all items in background (fire and forget)
+      if (wl.length > 0) {
+        getMargin(wl.slice(0, 20).map(it => ({
+          instrument_key: it.key,
+          quantity: Math.max(1, (it.lots ?? 1) * (it.lotSize ?? 1)),
+          product: (it.product ?? 'I') as 'I' | 'D' | 'CO' | 'MTF',
+          transaction_type: (it.direction ?? 'BUY') as 'BUY' | 'SELL',
+        }))).then(result => {
+          if (result?.margins) {
+            const newMap = new Map<string, number>();
+            result.margins.forEach((m, idx) => {
+              const key = wl[idx]?.key;
+              if (key) newMap.set(key, m.total_margin > 0 ? m.total_margin : m.equity_margin);
+            });
+            setMarginMap(newMap);
+          }
+        }).catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load watchlist');
     } finally {
@@ -97,6 +123,25 @@ export default function WatchlistScreen() {
 
   useEffect(() => { loadWatchlist(); }, [loadWatchlist]);
   useFocusEffect(useCallback(() => { loadWatchlist(); }, [loadWatchlist]));
+
+  // ── Picker margin: debounced fetch when selection changes ──────
+  useEffect(() => {
+    if (!lotsPending) { setPickerMargin(null); return; }
+    if (pickerMarginTimerRef.current) clearTimeout(pickerMarginTimerRef.current);
+    setPickerMarginLoading(true);
+    pickerMarginTimerRef.current = setTimeout(async () => {
+      const quantity = Math.max(1, lotsPending.lots * lotsPending.lotSize);
+      const result = await getMargin([{
+        instrument_key: lotsPending.key,
+        quantity,
+        product: lotsPending.product as 'I' | 'D' | 'CO' | 'MTF',
+        transaction_type: lotsPending.direction,
+      }]);
+      setPickerMargin(result);
+      setPickerMarginLoading(false);
+    }, 600);
+    return () => { if (pickerMarginTimerRef.current) clearTimeout(pickerMarginTimerRef.current); };
+  }, [lotsPending?.key, lotsPending?.lots, lotsPending?.product, lotsPending?.direction]);
 
   // ── WebSocket live prices ───────────────────────────────────────
   const connectWs = useCallback(() => {
@@ -252,15 +297,15 @@ export default function WatchlistScreen() {
   }, [optStrikeQuery, optSegment, normOptUnderlying, hasValidUnderlying, optYear, optMonth, optDay, optOptionType, showSearch, searchMode]);
 
   // ── Mutations ───────────────────────────────────────────────────
-  async function onAdd(item: InstrumentSearchItem, lots: number, product: 'I' | 'D') {
+  async function onAdd(item: InstrumentSearchItem, lots: number, product: 'I' | 'D' | 'MTF', direction: 'BUY' | 'SELL') {
     try {
       setMutatingKey(item.key);
       setLotsPending(null);
-      await addToWatchlist(item.key, lots, product);
+      await addToWatchlist(item.key, lots, product, direction);
       await loadWatchlist();
       const lotSize = item.lotSize ?? 1;
       const qty = lots * lotSize;
-      showToast(`${item.tradingSymbol} added · ${lots} lot${lots !== 1 ? 's' : ''} (${qty} qty) · ${product === 'I' ? 'Intraday' : 'Delivery'}`);
+      showToast(`${item.tradingSymbol} added · ${lots} lot${lots !== 1 ? 's' : ''} (${qty} qty) · ${product === 'I' ? 'Intraday' : product === 'MTF' ? 'MTF' : 'Delivery'} · ${direction}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to add');
     } finally { setMutatingKey(null); }
@@ -274,11 +319,18 @@ export default function WatchlistScreen() {
     } catch { showToast('Could not update lots'); }
   }
 
-  async function onUpdateProduct(key: string, newProduct: 'I' | 'D') {
+  async function onUpdateProduct(key: string, newProduct: 'I' | 'D' | 'MTF') {
     try {
       await updateWatchlistProduct(key, newProduct);
       setItems((prev) => prev.map((it) => it.key === key ? { ...it, product: newProduct } : it));
     } catch { showToast('Could not update product'); }
+  }
+
+  async function onUpdateDirection(key: string, newDirection: 'BUY' | 'SELL') {
+    try {
+      await updateWatchlistDirection(key, newDirection);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, direction: newDirection } : it));
+    } catch { showToast('Could not update direction'); }
   }
 
   async function onRemove(key: string) {
@@ -313,6 +365,15 @@ export default function WatchlistScreen() {
             <ThemedText style={[styles.resultSub, { color: palette.tint }]}>
               {pendingLots} lot{pendingLots !== 1 ? 's' : ''} × {lotSize} = {effectiveQty} qty · {pendingProduct === 'I' ? 'Intraday' : pendingProduct === 'MTF' ? 'MTF' : 'Delivery'} · {pendingDirection}
             </ThemedText>
+          )}
+          {isPickingLots && (
+            pickerMarginLoading
+              ? <ThemedText style={[styles.resultSub, { color: palette.muted }]}>Fetching margin…</ThemedText>
+              : pickerMargin != null
+                ? <ThemedText style={[styles.resultSub, { color: '#d97706', fontWeight: '700' }]}>
+                    ₹{(pickerMargin.margins?.[0]?.total_margin > 0 ? pickerMargin.margins[0].total_margin : (pickerMargin.margins?.[0]?.equity_margin ?? 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} req. margin
+                  </ThemedText>
+                : null
           )}
         </View>
         {inWL ? (
@@ -381,7 +442,7 @@ export default function WatchlistScreen() {
         ) : (
           <Pressable
             disabled={busy}
-            onPress={() => setLotsPending({ key: item.key, lots: 1, product: 'I', direction: 'BUY' })}
+            onPress={() => setLotsPending({ key: item.key, lots: 1, lotSize: item.lotSize ?? 1, product: 'I', direction: 'BUY' })}
             style={[styles.addBtn, { backgroundColor: palette.tint, opacity: busy ? 0.6 : 1 }]}>
             <ThemedText style={styles.addBtnText}>{busy ? '…' : '+ Add'}</ThemedText>
           </Pressable>
@@ -406,6 +467,7 @@ export default function WatchlistScreen() {
     const showLotsBadge = lotSize > 1 || lots > 1;
     const product = item.product ?? 'I';
     const direction = item.direction ?? 'BUY';
+    const reqMargin = marginMap.get(item.key);
     return (
       <View style={[styles.watchItem, { backgroundColor: palette.card, borderColor: palette.border }]}>
         <View style={styles.watchTop}>
@@ -445,6 +507,15 @@ export default function WatchlistScreen() {
           </View>
         ) : (
           <ThemedText style={[styles.noPrice, { color: palette.muted }]}>Waiting for price data…</ThemedText>
+        )}
+        {/* Required margin */}
+        {reqMargin != null && reqMargin > 0 && (
+          <View style={[styles.lotsRow, { marginTop: 2 }]}>
+            <ThemedText style={[styles.lotsText, { color: palette.muted }]}>Req. margin:</ThemedText>
+            <ThemedText style={{ fontWeight: '700', color: '#d97706', fontSize: 13 }}>
+              ₹{reqMargin.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </ThemedText>
+          </View>
         )}
         {/* Lots / qty row with inline +/- edit */}
         {showLotsBadge && (
