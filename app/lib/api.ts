@@ -525,9 +525,53 @@ export interface PortfolioHolding {
   product?: string;
 }
 
+export interface PortfolioProfile {
+  email?: string;
+  exchanges?: string[];
+  products?: string[];
+  broker?: string;
+  user_id?: string;
+  user_name?: string;
+  order_types?: string[];
+  user_type?: string;
+  poa?: boolean;
+  ddpi?: boolean;
+  is_active?: boolean;
+}
+
+export interface PnlTrade {
+  quantity: number;
+  isin?: string;
+  scrip_name: string;
+  trade_type: string;
+  buy_date?: string;
+  buy_average?: number;
+  sell_date?: string;
+  sell_average?: number;
+  buy_amount?: number;
+  sell_amount?: number;
+}
+
+export interface BrokerageResult {
+  charges?: {
+    total?: number;
+    brokerage?: number;
+    taxes?: { gst?: number; stt?: number; stamp_duty?: number };
+    other_charges?: { transaction?: number; clearing?: number; ipft?: number; sebi_turnover?: number };
+    dp_plan?: { name?: string; min_expense?: number };
+  };
+}
+
 export async function getPortfolioFunds(): Promise<PortfolioFunds> {
   const data = await request('/portfolio/funds');
   return (data?.data ?? {}) as PortfolioFunds;
+}
+
+export async function getPortfolioProfile(): Promise<PortfolioProfile | null> {
+  try {
+    const data = await request('/portfolio/profile');
+    return (data?.data ?? null) as PortfolioProfile | null;
+  } catch { return null; }
 }
 
 export async function getPortfolioOrders(): Promise<PortfolioOrder[]> {
@@ -543,4 +587,52 @@ export async function getPortfolioPositions(): Promise<PortfolioPosition[]> {
 export async function getPortfolioHoldings(): Promise<PortfolioHolding[]> {
   const data = await request('/portfolio/holdings');
   return (data?.data ?? []) as PortfolioHolding[];
+}
+
+export async function getPnlMeta(segment: string, financialYear: string, fromDate?: string, toDate?: string) {
+  const params = new URLSearchParams({ segment, financial_year: financialYear });
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const data = await request(`/portfolio/pnl/meta?${params}`);
+  return data?.data as { trades_count: number; page_size_limit: number } | null;
+}
+
+export async function getPnlData(
+  segment: string, financialYear: string,
+  pageNumber = 1, pageSize = 100,
+  fromDate?: string, toDate?: string
+): Promise<PnlTrade[]> {
+  const params = new URLSearchParams({
+    segment, financial_year: financialYear,
+    page_number: String(pageNumber), page_size: String(pageSize),
+  });
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const data = await request(`/portfolio/pnl/data?${params}`);
+  return (data?.data ?? []) as PnlTrade[];
+}
+
+export async function getPnlCharges(segment: string, financialYear: string, fromDate?: string, toDate?: string) {
+  const params = new URLSearchParams({ segment, financial_year: financialYear });
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
+  const data = await request(`/portfolio/pnl/charges?${params}`);
+  return data?.data as { charges_breakdown?: BrokerageResult['charges'] } | null;
+}
+
+export async function getBrokerageDetails(
+  instrumentToken: string, quantity: number, product: string,
+  transactionType: string, price: number
+): Promise<BrokerageResult | null> {
+  const params = new URLSearchParams({
+    instrument_token: instrumentToken,
+    quantity: String(quantity),
+    product,
+    transaction_type: transactionType,
+    price: String(price),
+  });
+  try {
+    const data = await request(`/portfolio/brokerage?${params}`);
+    return data?.data as BrokerageResult;
+  } catch { return null; }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -16,19 +16,27 @@ import { Colors } from "@/constants/theme";
 import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
+  getBrokerageDetails,
+  getPnlCharges,
+  getPnlData,
+  getPnlMeta,
   getPortfolioFunds,
   getPortfolioHoldings,
   getPortfolioOrders,
   getPortfolioPositions,
+  getPortfolioProfile,
+  type BrokerageResult,
   type PortfolioFunds,
   type PortfolioHolding,
   type PortfolioOrder,
   type PortfolioPosition,
+  type PortfolioProfile,
+  type PnlTrade,
 } from "@/lib/api";
 import { APP_CONFIG } from "@/lib/config";
 import { showToast } from "@/lib/toast";
 
-type TabKey = "positions" | "orders" | "holdings";
+type TabKey = "positions" | "orders" | "holdings" | "pnl";
 
 function fmt(n?: number | null, digits = 2) {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -173,7 +181,37 @@ function HoldingRow({ item, palette }: { item: PortfolioHolding; palette: (typeo
   );
 }
 
-export default function PortfolioScreen() {
+function PnlRow({ item, palette }: { item: PnlTrade; palette: (typeof Colors)["light"] }) {
+  const pnl = (item.sell_amount ?? 0) - (item.buy_amount ?? 0);
+  const pnlColor = pnl >= 0 ? "#16a34a" : "#dc2626";
+  return (
+    <View style={[styles.rowCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+      <View style={styles.rowTop}>
+        <ThemedText style={styles.rowSymbol}>{item.scrip_name}</ThemedText>
+        <ThemedText style={[styles.pnlText, { color: pnlColor }]}>
+          {pnl >= 0 ? "+" : ""}₹{fmt(Math.abs(pnl))}
+        </ThemedText>
+      </View>
+      <View style={styles.rowMid}>
+        <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
+          Qty: <ThemedText style={{ color: palette.text }}>{item.quantity}</ThemedText>
+        </ThemedText>
+        <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
+          Buy: <ThemedText style={{ color: palette.text }}>₹{fmt(item.buy_average)}</ThemedText>
+        </ThemedText>
+        <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
+          Sell: <ThemedText style={{ color: palette.text }}>₹{fmt(item.sell_average)}</ThemedText>
+        </ThemedText>
+        <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>{item.trade_type}</ThemedText>
+      </View>
+      {item.sell_date && (
+        <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
+          {item.buy_date} → {item.sell_date}
+        </ThemedText>
+      )}
+    </View>
+  );
+}
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
@@ -181,13 +219,28 @@ export default function PortfolioScreen() {
 
   const [activeTab, setActiveTab] = useState<TabKey>("positions");
   const [funds, setFunds] = useState<PortfolioFunds | null>(null);
+  const [profile, setProfile] = useState<PortfolioProfile | null>(null);
   const [orders, setOrders] = useState<PortfolioOrder[]>([]);
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
+  const [pnlTrades, setPnlTrades] = useState<PnlTrade[]>([]);
+  const [pnlCharges, setPnlCharges] = useState<{ charges_breakdown?: any } | null>(null);
+  const [pnlLoading, setPnlLoading] = useState(false);
+  const [pnlSegment, setPnlSegment] = useState<'EQ' | 'FO'>('EQ');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Compute current financial year string e.g. "2526" for April 2025–March 2026
+  const financialYear = useMemo(() => {
+    const now = new Date();
+    const yr = now.getFullYear();
+    const month = now.getMonth() + 1; // 1-based
+    const fyStart = month >= 4 ? yr : yr - 1;
+    const fyEnd = fyStart + 1;
+    return `${String(fyStart).slice(-2)}${String(fyEnd).slice(-2)}`;
+  }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -210,13 +263,15 @@ export default function PortfolioScreen() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [f, o, p, h] = await Promise.all([
+      const [f, prof, o, p, h] = await Promise.all([
         getPortfolioFunds(),
+        getPortfolioProfile(),
         getPortfolioOrders(),
         getPortfolioPositions(),
         getPortfolioHoldings(),
       ]);
       setFunds(f);
+      setProfile(prof);
       setOrders(dedupeOrders(o));
       setPositions(p);
       setHoldings(h);
@@ -230,6 +285,25 @@ export default function PortfolioScreen() {
       setRefreshing(false);
     }
   }, [dedupeOrders]);
+
+  const fetchPnl = useCallback(async (segment: 'EQ' | 'FO') => {
+    setPnlLoading(true);
+    try {
+      const meta = await getPnlMeta(segment, financialYear);
+      const pageSize = Math.min(meta?.page_size_limit ?? 100, 500);
+      const [trades, charges] = await Promise.all([
+        getPnlData(segment, financialYear, 1, pageSize),
+        getPnlCharges(segment, financialYear),
+      ]);
+      setPnlTrades(trades);
+      setPnlCharges(charges);
+    } catch {
+      setPnlTrades([]);
+      setPnlCharges(null);
+    } finally {
+      setPnlLoading(false);
+    }
+  }, [financialYear]);
 
   // WebSocket for real-time portfolio updates
   const connectWs = useCallback(() => {
@@ -290,6 +364,11 @@ export default function PortfolioScreen() {
     };
   }, [fetchAll, connectWs]);
 
+  // Load P&L when switching to pnl tab or changing segment
+  useEffect(() => {
+    if (activeTab === 'pnl') fetchPnl(pnlSegment);
+  }, [activeTab, pnlSegment, fetchPnl]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchAll(true);
@@ -306,6 +385,7 @@ export default function PortfolioScreen() {
     { key: "positions", label: "Positions", count: positions.length },
     { key: "orders", label: "Orders", count: orders.length },
     { key: "holdings", label: "Holdings", count: holdings.length },
+    { key: "pnl", label: "P&L", count: 0 },
   ];
 
   if (loading) {
@@ -324,10 +404,15 @@ export default function PortfolioScreen() {
       ? ({ item }: { item: PortfolioOrder }) => <OrderRow item={item} palette={palette} />
       : activeTab === "positions"
       ? ({ item }: { item: PortfolioPosition }) => <PositionRow item={item} palette={palette} />
+      : activeTab === "pnl"
+      ? ({ item }: { item: PnlTrade }) => <PnlRow item={item} palette={palette} />
       : ({ item }: { item: PortfolioHolding }) => <HoldingRow item={item} palette={palette} />;
 
   const data =
-    activeTab === "orders" ? orders : activeTab === "positions" ? positions : holdings;
+    activeTab === "orders" ? orders
+    : activeTab === "positions" ? positions
+    : activeTab === "pnl" ? pnlTrades
+    : holdings;
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: palette.background }]}>
@@ -359,7 +444,14 @@ export default function PortfolioScreen() {
           <>
             {/* Header */}
             <View style={styles.header}>
-              <ThemedText type="title" style={styles.title}>Portfolio</ThemedText>
+              <View>
+                <ThemedText type="title" style={styles.title}>Portfolio</ThemedText>
+                {profile?.user_name && (
+                  <ThemedText style={[styles.profileName, { color: palette.muted }]}>
+                    {profile.user_name}{profile.user_id ? ` · ${profile.user_id}` : ''}
+                  </ThemedText>
+                )}
+              </View>
               <View style={styles.headerRight}>
                 {lastUpdated && (
                   <ThemedText style={[styles.updatedText, { color: palette.muted }]}>
@@ -403,7 +495,32 @@ export default function PortfolioScreen() {
                 <MetricCard label="Used Margin" value={fmtCurrency(used)} palette={palette} />
                 <MetricCard label="Today Payin" value={fmtCurrency(payin)} palette={palette} />
                 <MetricCard label="Exposure" value={fmtCurrency(exposure)} palette={palette} />
+                {(funds?.equity?.span_margin ?? 0) > 0 && (
+                  <MetricCard label="SPAN" value={fmtCurrency(funds?.equity?.span_margin)} palette={palette} />
+                )}
               </ScrollView>
+            )}
+
+            {/* P&L segment selector (shown only on P&L tab) */}
+            {activeTab === 'pnl' && (
+              <View style={[styles.segmentRow, { backgroundColor: palette.card, borderColor: palette.border }]}>
+                {(['EQ', 'FO'] as const).map(seg => (
+                  <Pressable
+                    key={seg}
+                    style={[styles.segBtn, pnlSegment === seg && { backgroundColor: palette.tint }]}
+                    onPress={() => setPnlSegment(seg)}>
+                    <ThemedText style={[
+                      styles.segBtnText,
+                      { color: pnlSegment === seg ? '#fff' : palette.muted },
+                    ]}>{seg === 'EQ' ? 'Equity' : 'F&O'}</ThemedText>
+                  </Pressable>
+                ))}
+                {pnlCharges?.charges_breakdown && (
+                  <ThemedText style={[styles.chargesText, { color: palette.muted }]}>
+                    Charges: ₹{fmt(pnlCharges.charges_breakdown.total)}
+                  </ThemedText>
+                )}
+              </View>
             )}
 
             {/* Tabs */}
@@ -434,15 +551,20 @@ export default function PortfolioScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <ThemedText style={[styles.emptyText, { color: palette.muted }]}>
-              {error
-                ? "Could not load data"
-                : activeTab === "orders"
-                ? "No orders today"
-                : activeTab === "positions"
-                ? "No open positions"
-                : "No holdings found"}
-            </ThemedText>
+            {activeTab === 'pnl' && pnlLoading
+              ? <ActivityIndicator size="large" color={palette.tint} />
+              : <ThemedText style={[styles.emptyText, { color: palette.muted }]}>
+                  {error
+                    ? "Could not load data"
+                    : activeTab === "orders"
+                    ? "No orders today"
+                    : activeTab === "positions"
+                    ? "No open positions"
+                    : activeTab === "pnl"
+                    ? "No P&L data for this financial year"
+                    : "No holdings found"}
+                </ThemedText>
+            }
           </View>
         }
       />
@@ -557,4 +679,23 @@ const styles = StyleSheet.create({
 
   empty: { paddingTop: 40, alignItems: "center" },
   emptyText: { fontSize: 15 },
+
+  profileName: { fontSize: 12, marginTop: 2 },
+
+  segmentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 10,
+    gap: 4,
+  },
+  segBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 7,
+  },
+  segBtnText: { fontSize: 12, fontWeight: "600" },
+  chargesText: { fontSize: 12, marginLeft: "auto", paddingRight: 6 },
 });
