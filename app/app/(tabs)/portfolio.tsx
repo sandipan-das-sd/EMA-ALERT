@@ -212,6 +212,8 @@ function PnlRow({ item, palette }: { item: PnlTrade; palette: (typeof Colors)["l
     </View>
   );
 }
+
+export default function PortfolioScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const palette = Colors[colorScheme];
   const insets = useSafeAreaInsets();
