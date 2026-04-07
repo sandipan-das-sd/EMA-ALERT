@@ -150,6 +150,10 @@ async function start() {
     });
     console.log('MongoDB connected');
 
+    // Restore any active auto-trades that were in progress before last restart
+    const { autoTradeService } = await import('./services/autoTradeService.js');
+    await autoTradeService.loadFromDb();
+
     // Initialize Redis for distributed caching (optional, with fallback)
     const redis = getRedisService();
     const redisConnected = await redis.connect();

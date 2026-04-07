@@ -15,6 +15,83 @@ const UPSTOX_V2_BASE = process.env.UPSTOX_SANDBOX === 'true'
 // Map: `${userId}:${instrumentKey}` -> TradeState
 const activeTrades = new Map();
 
+// ------------------ DB persistence helpers ------------------
+
+async function saveTrade(tradeKey, trade) {
+  try {
+    const ActiveTradeState = (await import('../models/ActiveTradeState.js')).default;
+    await ActiveTradeState.findOneAndUpdate(
+      { tradeKey },
+      {
+        tradeKey,
+        userId: String(trade.userId),
+        instrumentKey: trade.instrumentKey,
+        orderId: trade.orderId,
+        status: trade.status,
+        transactionType: trade.transactionType,
+        entryPrice: trade.entryPrice,
+        initialSL: trade.initialSL,
+        currentTrailSL: trade.currentTrailSL,
+        target1: trade.target1,
+        quantity: trade.quantity,
+        product: trade.product,
+        signalTs: trade.signalTs,
+        lastCandleTs: trade.lastCandleTs,
+        createdAt: trade.createdAt,
+      },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error('[AutoTrade] DB saveTrade error:', err.message);
+  }
+}
+
+async function deleteTrade(tradeKey) {
+  try {
+    const ActiveTradeState = (await import('../models/ActiveTradeState.js')).default;
+    await ActiveTradeState.deleteOne({ tradeKey });
+  } catch (err) {
+    console.error('[AutoTrade] DB deleteTrade error:', err.message);
+  }
+}
+
+async function loadFromDb() {
+  try {
+    const ActiveTradeState = (await import('../models/ActiveTradeState.js')).default;
+    const User = (await import('../models/User.js')).default;
+    const records = await ActiveTradeState.find({});
+    let loaded = 0;
+    for (const rec of records) {
+      const user = await User.findById(rec.userId).select('+upstoxAccessToken');
+      if (!user?.upstoxAccessToken) {
+        await ActiveTradeState.deleteOne({ tradeKey: rec.tradeKey });
+        continue;
+      }
+      activeTrades.set(rec.tradeKey, {
+        userId: rec.userId,
+        instrumentKey: rec.instrumentKey,
+        orderId: rec.orderId,
+        status: rec.status,
+        transactionType: rec.transactionType,
+        entryPrice: rec.entryPrice,
+        initialSL: rec.initialSL,
+        currentTrailSL: rec.currentTrailSL,
+        target1: rec.target1,
+        quantity: rec.quantity,
+        product: rec.product,
+        accessToken: user.upstoxAccessToken,
+        signalTs: rec.signalTs,
+        lastCandleTs: rec.lastCandleTs,
+        createdAt: rec.createdAt,
+      });
+      loaded++;
+    }
+    if (loaded > 0) console.log(`[AutoTrade] ✅ Restored ${loaded} active trade(s) from DB`);
+  } catch (err) {
+    console.error('[AutoTrade] DB loadFromDb error:', err.message);
+  }
+}
+
 // ------------------ Upstox API helpers ------------------
 
 async function placeOrder(accessToken, orderData) {
@@ -134,7 +211,7 @@ async function onSignal(userId, instrumentKey, sig) {
     const orderId = orderData?.order_ids?.[0];
     if (!orderId) throw new Error('No order_id returned by Upstox');
 
-    activeTrades.set(tradeKey, {
+    const newTrade = {
       userId,
       instrumentKey,
       orderId,
@@ -150,7 +227,9 @@ async function onSignal(userId, instrumentKey, sig) {
       signalTs: sig.ts,
       lastCandleTs: 0,
       createdAt: Date.now(),
-    });
+    };
+    activeTrades.set(tradeKey, newTrade);
+    await saveTrade(tradeKey, newTrade);
 
     console.log(
       `[AutoTrade] 📈 LIMIT ${transactionType} placed` +
@@ -183,11 +262,14 @@ async function onCandleTick(instrumentKey, candles) {
         if (!info) return;
 
         if (info.status === 'complete') {
-          activeTrades.set(tradeKey, { ...trade, status: 'in_trade' });
+          const filledTrade = { ...trade, status: 'in_trade' };
+          activeTrades.set(tradeKey, filledTrade);
+          await saveTrade(tradeKey, filledTrade);
           console.log(`[AutoTrade] ✅ Entry filled for ${instrumentKey} @ ${info.average_price}`);
         } else if (info.status === 'rejected' || info.status === 'cancelled') {
           console.log(`[AutoTrade] ❌ Entry ${info.status} for ${instrumentKey}: ${info.status_message || ''}`);
           activeTrades.delete(tradeKey);
+          await deleteTrade(tradeKey);
         }
         // still pending → wait
         return;
@@ -228,6 +310,7 @@ async function onCandleTick(instrumentKey, candles) {
 
           const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
           activeTrades.set(tradeKey, updatedTrade);
+          await saveTrade(tradeKey, updatedTrade);
 
           // Target1 hit: candle low touches or goes below target (short profits when price falls)
           if (candleLow <= trade.target1) {
@@ -256,6 +339,7 @@ async function onCandleTick(instrumentKey, candles) {
 
           const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
           activeTrades.set(tradeKey, updatedTrade);
+          await saveTrade(tradeKey, updatedTrade);
 
           // Target1 hit: candle high touches or exceeds target (long profits when price rises)
           if (candleHigh >= trade.target1) {
@@ -308,6 +392,7 @@ async function exitTrade(tradeKey, trade) {
       ` | orderId=${exitOrderId}`
     );
     activeTrades.delete(tradeKey);
+    await deleteTrade(tradeKey);
   } catch (err) {
     console.error(`[AutoTrade] Failed to exit ${trade.instrumentKey}:`, err.message);
     // Leave in map — will retry on next tick
@@ -369,4 +454,5 @@ export const autoTradeService = {
   onCandleTick,
   cancelAllPendingEntries,
   getActiveTrades,
+  loadFromDb,
 };
