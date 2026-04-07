@@ -213,25 +213,35 @@ async function onCandleTick(instrumentKey, candles) {
         const candleHigh = Number(latestClosed[2]);
         const candleLow = Number(latestClosed[3]);
 
-        let newTrailSL = trade.currentTrailSL;
+        // Capture OLD trail SL before any update — exit check must use this
+        const oldTrailSL = trade.currentTrailSL;
+        let newTrailSL = oldTrailSL;
 
         if (trade.transactionType === 'SELL') {
           // Short trade: ratchet trail SL downward only
           if (candleLow < newTrailSL) {
             newTrailSL = candleLow;
             console.log(
-              `[AutoTrade] ↓ Trail SL (SELL) for ${instrumentKey}: ${trade.currentTrailSL} → ${newTrailSL}`
+              `[AutoTrade] ↓ Trail SL (SELL) for ${instrumentKey}: ${oldTrailSL} → ${newTrailSL}`
             );
           }
 
           const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
           activeTrades.set(tradeKey, updatedTrade);
 
-          // Short SL hit: candle high touches or exceeds trail SL
-          if (candleHigh >= newTrailSL) {
+          // Target1 hit: candle low touches or goes below target (short profits when price falls)
+          if (candleLow <= trade.target1) {
+            console.log(
+              `[AutoTrade] 🎯 Target1 hit (SELL) for ${instrumentKey}:` +
+              ` candle_low=${candleLow} <= target1=${trade.target1}`
+            );
+            await exitTrade(tradeKey, updatedTrade);
+          }
+          // Short SL hit: candle high touches or exceeds OLD trail SL
+          else if (candleHigh >= oldTrailSL) {
             console.log(
               `[AutoTrade] 🔴 Trail SL hit (SELL) for ${instrumentKey}:` +
-              ` candle_high=${candleHigh} >= trailSL=${newTrailSL}`
+              ` candle_high=${candleHigh} >= trailSL=${oldTrailSL}`
             );
             await exitTrade(tradeKey, updatedTrade);
           }
@@ -240,18 +250,26 @@ async function onCandleTick(instrumentKey, candles) {
           if (candleHigh > newTrailSL) {
             newTrailSL = candleHigh;
             console.log(
-              `[AutoTrade] ↑ Trail SL (BUY) for ${instrumentKey}: ${trade.currentTrailSL} → ${newTrailSL}`
+              `[AutoTrade] ↑ Trail SL (BUY) for ${instrumentKey}: ${oldTrailSL} → ${newTrailSL}`
             );
           }
 
           const updatedTrade = { ...trade, currentTrailSL: newTrailSL, lastCandleTs: latestTs };
           activeTrades.set(tradeKey, updatedTrade);
 
-          // Long SL hit: candle low touches or goes below trail SL
-          if (candleLow <= newTrailSL) {
+          // Target1 hit: candle high touches or exceeds target (long profits when price rises)
+          if (candleHigh >= trade.target1) {
+            console.log(
+              `[AutoTrade] 🎯 Target1 hit (BUY) for ${instrumentKey}:` +
+              ` candle_high=${candleHigh} >= target1=${trade.target1}`
+            );
+            await exitTrade(tradeKey, updatedTrade);
+          }
+          // Long SL hit: candle low touches or goes below OLD trail SL
+          else if (candleLow <= oldTrailSL) {
             console.log(
               `[AutoTrade] 🔴 Trail SL hit (BUY) for ${instrumentKey}:` +
-              ` candle_low=${candleLow} <= trailSL=${newTrailSL}`
+              ` candle_low=${candleLow} <= trailSL=${oldTrailSL}`
             );
             await exitTrade(tradeKey, updatedTrade);
           }
