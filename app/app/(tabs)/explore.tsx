@@ -57,7 +57,7 @@ export default function WatchlistScreen() {
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lots picker state: when user taps "+ Add", we ask how many lots + product + direction before confirming
-  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; lotSize: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL' } | null>(null);
+  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; lotSize: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL'; targetPoints: number } | null>(null);
   // Margin estimate for the current picker selection
   const [pickerMargin, setPickerMargin] = useState<MarginResult | null>(null);
   const [pickerMarginLoading, setPickerMarginLoading] = useState(false);
@@ -298,15 +298,16 @@ export default function WatchlistScreen() {
   }, [optStrikeQuery, optSegment, normOptUnderlying, hasValidUnderlying, optYear, optMonth, optDay, optOptionType, showSearch, searchMode]);
 
   // ── Mutations ───────────────────────────────────────────────────
-  async function onAdd(item: InstrumentSearchItem, lots: number, product: 'I' | 'D' | 'MTF', direction: 'BUY' | 'SELL') {
+  async function onAdd(item: InstrumentSearchItem, lots: number, product: 'I' | 'D' | 'MTF', direction: 'BUY' | 'SELL', targetPoints: number) {
     try {
       setMutatingKey(item.key);
       setLotsPending(null);
-      await addToWatchlist(item.key, lots, product, direction);
+      await addToWatchlist(item.key, lots, product, direction, targetPoints);
       await loadWatchlist();
       const lotSize = item.lotSize ?? 1;
       const qty = lots * lotSize;
-      showToast(`${item.tradingSymbol} added · ${lots} lot${lots !== 1 ? 's' : ''} (${qty} qty) · ${product === 'I' ? 'Intraday' : product === 'MTF' ? 'MTF' : 'Delivery'} · ${direction}`);
+      const tgtStr = targetPoints > 0 ? ` · T1 +${targetPoints}pts` : ' · T1 1R';
+      showToast(`${item.tradingSymbol} added · ${lots} lot${lots !== 1 ? 's' : ''} (${qty} qty) · ${product === 'I' ? 'Intraday' : product === 'MTF' ? 'MTF' : 'Delivery'} · ${direction}${tgtStr}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to add');
     } finally { setMutatingKey(null); }
@@ -361,6 +362,7 @@ export default function WatchlistScreen() {
     const pendingLots = isPickingLots ? lotsPending!.lots : 1;
     const pendingProduct = isPickingLots ? lotsPending!.product : 'I';
     const pendingDirection = isPickingLots ? lotsPending!.direction : 'BUY';
+    const pendingTargetPoints = isPickingLots ? lotsPending!.targetPoints : 0;
     const lotSize = item.lotSize ?? 1;
     const effectiveQty = pendingLots * lotSize;
     return (
@@ -440,9 +442,36 @@ export default function WatchlistScreen() {
                 }]}>
                 <ThemedText style={[styles.productBtnText, { color: pendingDirection === 'SELL' ? '#fff' : '#dc2626' }]}>SELL</ThemedText>
               </Pressable>
+            </View>
+            {/* Target points row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <ThemedText style={[styles.resultSub, { color: palette.muted }]}>Target:</ThemedText>
+              <TextInput
+                keyboardType="numeric"
+                value={pendingTargetPoints > 0 ? String(pendingTargetPoints) : ''}
+                placeholder="pts"
+                placeholderTextColor={palette.muted}
+                onChangeText={(t) => {
+                  const v = parseFloat(t);
+                  setLotsPending((p) => p ? { ...p, targetPoints: isNaN(v) || v <= 0 ? 0 : v } : p);
+                }}
+                style={[
+                  styles.input,
+                  { color: palette.text, borderColor: pendingTargetPoints > 0 ? '#d97706' : palette.border,
+                    width: 64, fontSize: 13, paddingVertical: 2, textAlign: 'center', marginBottom: 0 }
+                ]}
+              />
+              <Pressable
+                onPress={() => setLotsPending((p) => p ? { ...p, targetPoints: 0 } : p)}
+                style={[styles.productBtn, {
+                  backgroundColor: pendingTargetPoints === 0 ? '#d97706' : palette.card,
+                  borderColor: '#d97706',
+                }]}>
+                <ThemedText style={[styles.productBtnText, { color: pendingTargetPoints === 0 ? '#fff' : '#d97706' }]}>1R</ThemedText>
+              </Pressable>
               <Pressable
                 disabled={busy}
-                onPress={() => onAdd(item, pendingLots, pendingProduct, pendingDirection)}
+                onPress={() => onAdd(item, pendingLots, pendingProduct, pendingDirection, pendingTargetPoints)}
                 style={[styles.addBtn, { backgroundColor: '#16a34a', opacity: busy ? 0.6 : 1 }]}>
                 <ThemedText style={styles.addBtnText}>{busy ? '…' : '✓'}</ThemedText>
               </Pressable>
@@ -451,7 +480,7 @@ export default function WatchlistScreen() {
         ) : (
           <Pressable
             disabled={busy}
-            onPress={() => setLotsPending({ key: item.key, lots: 1, lotSize: item.lotSize ?? 1, product: 'I', direction: 'BUY' })}
+            onPress={() => setLotsPending({ key: item.key, lots: 1, lotSize: item.lotSize ?? 1, product: 'I', direction: 'BUY', targetPoints: 0 })}
             style={[styles.addBtn, { backgroundColor: palette.tint, opacity: busy ? 0.6 : 1 }]}>
             <ThemedText style={styles.addBtnText}>{busy ? '…' : '+ Add'}</ThemedText>
           </Pressable>

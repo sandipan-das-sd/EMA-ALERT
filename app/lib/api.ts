@@ -282,10 +282,10 @@ export async function getBatchLtp(keys: string[]) {
   return (data?.data || {}) as Record<string, any>;
 }
 
-export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' | 'MTF' = 'I', direction: 'BUY' | 'SELL' = 'BUY') {
+export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' | 'MTF' = 'I', direction: 'BUY' | 'SELL' = 'BUY', targetPoints = 0) {
   const data = await request("/watchlist", {
     method: "POST",
-    body: { instrumentKey, lots, product, direction },
+    body: { instrumentKey, lots, product, direction, targetPoints },
   });
   return (data?.watchlist || []) as string[];
 }
