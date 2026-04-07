@@ -57,7 +57,7 @@ export default function WatchlistScreen() {
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Lots picker state: when user taps "+ Add", we ask how many lots + product + direction before confirming
-  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; lotSize: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL'; targetPoints: number } | null>(null);
+  const [lotsPending, setLotsPending] = useState<{ key: string; lots: number; lotSize: number; product: 'I' | 'D' | 'MTF'; direction: 'BUY' | 'SELL'; targetPoints: number; targetStr: string } | null>(null);
   // Margin estimate for the current picker selection
   const [pickerMargin, setPickerMargin] = useState<MarginResult | null>(null);
   const [pickerMarginLoading, setPickerMarginLoading] = useState(false);
@@ -443,44 +443,79 @@ export default function WatchlistScreen() {
                 <ThemedText style={[styles.productBtnText, { color: pendingDirection === 'SELL' ? '#fff' : '#dc2626' }]}>SELL</ThemedText>
               </Pressable>
             </View>
-            {/* Target points row */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <ThemedText style={[styles.resultSub, { color: palette.muted }]}>Target:</ThemedText>
-              <TextInput
-                keyboardType="numeric"
-                value={pendingTargetPoints > 0 ? String(pendingTargetPoints) : ''}
-                placeholder="pts"
-                placeholderTextColor={palette.muted}
-                onChangeText={(t) => {
-                  const v = parseFloat(t);
-                  setLotsPending((p) => p ? { ...p, targetPoints: isNaN(v) || v <= 0 ? 0 : v } : p);
-                }}
-                style={[
-                  styles.input,
-                  { color: palette.text, borderColor: pendingTargetPoints > 0 ? '#d97706' : palette.border,
-                    width: 64, fontSize: 13, paddingVertical: 2, textAlign: 'center', marginBottom: 0 }
-                ]}
-              />
-              <Pressable
-                onPress={() => setLotsPending((p) => p ? { ...p, targetPoints: 0 } : p)}
-                style={[styles.productBtn, {
-                  backgroundColor: pendingTargetPoints === 0 ? '#d97706' : palette.card,
-                  borderColor: '#d97706',
-                }]}>
-                <ThemedText style={[styles.productBtnText, { color: pendingTargetPoints === 0 ? '#fff' : '#d97706' }]}>1R</ThemedText>
-              </Pressable>
-              <Pressable
-                disabled={busy}
-                onPress={() => onAdd(item, pendingLots, pendingProduct, pendingDirection, pendingTargetPoints)}
-                style={[styles.addBtn, { backgroundColor: '#16a34a', opacity: busy ? 0.6 : 1 }]}>
-                <ThemedText style={styles.addBtnText}>{busy ? '…' : '✓'}</ThemedText>
-              </Pressable>
-            </View>
+            {/* Target points numpad */}
+            {(() => {
+              const targetStr = isPickingLots ? (lotsPending!.targetStr ?? '') : '';
+              const displayVal = targetStr || null;
+              function handleNumpad(key: string) {
+                setLotsPending((p) => {
+                  if (!p) return p;
+                  let s = p.targetStr ?? '';
+                  if (key === '⌫') {
+                    s = s.slice(0, -1);
+                  } else if (key === '.') {
+                    if (!s.includes('.') && s.length > 0) s += '.';
+                  } else {
+                    if (s.length < 6) s += key;
+                  }
+                  const v = parseFloat(s);
+                  return { ...p, targetStr: s, targetPoints: isNaN(v) || v <= 0 ? 0 : v };
+                });
+              }
+              return (
+                <View style={{ gap: 4 }}>
+                  {/* Display */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: palette.background, borderRadius: 6, borderWidth: 1, borderColor: displayVal ? '#d97706' : palette.border, paddingHorizontal: 8, paddingVertical: 4 }}>
+                    <ThemedText style={{ color: palette.muted, fontSize: 11 }}>Target:</ThemedText>
+                    <ThemedText style={{ fontWeight: '700', fontSize: 14, color: displayVal ? '#d97706' : palette.muted }}>
+                      {displayVal ? `${displayVal} pts` : '1R (default)'}
+                    </ThemedText>
+                  </View>
+                  {/* Numpad grid */}
+                  {[['1','2','3'],['4','5','6'],['7','8','9'],['1R','0','⌫']].map((row) => (
+                    <View key={row.join('')} style={{ flexDirection: 'row', gap: 4 }}>
+                      {row.map((k) => (
+                        <Pressable
+                          key={k}
+                          onPress={() => {
+                            if (k === '1R') {
+                              setLotsPending((p) => p ? { ...p, targetStr: '', targetPoints: 0 } : p);
+                            } else {
+                              handleNumpad(k);
+                            }
+                          }}
+                          style={[styles.numpadBtn, {
+                            backgroundColor: k === '1R'
+                              ? (pendingTargetPoints === 0 ? '#d97706' : palette.card)
+                              : k === '⌫' ? '#fee2e2' : palette.card,
+                            borderColor: k === '1R' ? '#d97706' : k === '⌫' ? '#dc2626' : palette.border,
+                          }]}>
+                          <ThemedText style={{
+                            fontWeight: '700',
+                            fontSize: k === '1R' ? 11 : 15,
+                            color: k === '1R'
+                              ? (pendingTargetPoints === 0 ? '#fff' : '#d97706')
+                              : k === '⌫' ? '#dc2626' : palette.text,
+                          }}>{k}</ThemedText>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ))}
+                  {/* Confirm button */}
+                  <Pressable
+                    disabled={busy}
+                    onPress={() => onAdd(item, pendingLots, pendingProduct, pendingDirection, pendingTargetPoints)}
+                    style={{ backgroundColor: '#16a34a', borderRadius: 8, paddingVertical: 8, alignItems: 'center', opacity: busy ? 0.6 : 1 }}>
+                    <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>{busy ? '…' : '✓  Add to Watchlist'}</ThemedText>
+                  </Pressable>
+                </View>
+              );
+            })()}
           </View>
         ) : (
           <Pressable
             disabled={busy}
-            onPress={() => setLotsPending({ key: item.key, lots: 1, lotSize: item.lotSize ?? 1, product: 'I', direction: 'BUY', targetPoints: 0 })}
+            onPress={() => setLotsPending({ key: item.key, lots: 1, lotSize: item.lotSize ?? 1, product: 'I', direction: 'BUY', targetPoints: 0, targetStr: '' })}
             style={[styles.addBtn, { backgroundColor: palette.tint, opacity: busy ? 0.6 : 1 }]}>
             <ThemedText style={styles.addBtnText}>{busy ? '…' : '+ Add'}</ThemedText>
           </Pressable>
@@ -847,6 +882,7 @@ const styles = StyleSheet.create({
   addBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 },
   addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   lotsStepBtn: { borderWidth: 1, borderRadius: 6, width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  numpadBtn: { borderWidth: 1, borderRadius: 8, flex: 1, height: 38, alignItems: 'center', justifyContent: 'center' },
 
   watchItem: { borderWidth: 1, borderRadius: 14, padding: 14 },
   watchTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
