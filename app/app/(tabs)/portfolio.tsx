@@ -24,7 +24,9 @@ import {
   getPortfolioHoldings,
   getPortfolioOrders,
   getPortfolioPositions,
+  getActiveTrades,
   getPortfolioProfile,
+  type ActiveTrade,
   type BrokerageResult,
   type PortfolioFunds,
   type PortfolioHolding,
@@ -110,6 +112,11 @@ function OrderRow({ item, palette }: { item: PortfolioOrder; palette: (typeof Co
         <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
           Price: <ThemedText style={{ color: palette.text }}>₹{fmt(item.price)}</ThemedText>
         </ThemedText>
+        {(item.trigger_price ?? 0) > 0 && (
+          <ThemedText style={[styles.rowDetail, { color: "#dc2626" }]}>
+            Trigger: <ThemedText style={{ color: "#dc2626", fontWeight: "700" }}>₹{fmt(item.trigger_price)}</ThemedText>
+          </ThemedText>
+        )}
         {(item.average_price ?? 0) > 0 && (
           <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
             Avg: <ThemedText style={{ color: palette.text }}>₹{fmt(item.average_price)}</ThemedText>
@@ -120,13 +127,21 @@ function OrderRow({ item, palette }: { item: PortfolioOrder; palette: (typeof Co
   );
 }
 
-function PositionRow({ item, palette }: { item: PortfolioPosition; palette: (typeof Colors)["light"] }) {
+function PositionRow({ item, trade, palette }: { item: PortfolioPosition; trade?: ActiveTrade; palette: (typeof Colors)["light"] }) {
   const pnl = item.pnl ?? (item.unrealised_profit ?? 0) + (item.realised_profit ?? 0);
   const pnlColor = pnl >= 0 ? "#16a34a" : "#dc2626";
+  const isShort = (item.quantity ?? 0) < 0;
   return (
     <View style={[styles.rowCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
       <View style={styles.rowTop}>
-        <ThemedText style={styles.rowSymbol}>{item.trading_symbol}</ThemedText>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <ThemedText style={styles.rowSymbol}>{item.trading_symbol}</ThemedText>
+          <View style={[styles.sidePill, { backgroundColor: isShort ? "#dc262622" : "#16a34a22" }]}>
+            <ThemedText style={[styles.sideText, { color: isShort ? "#dc2626" : "#16a34a" }]}>
+              {isShort ? "SHORT" : "LONG"}
+            </ThemedText>
+          </View>
+        </View>
         <ThemedText style={[styles.pnlText, { color: pnlColor }]}>
           {pnl >= 0 ? "+" : ""}₹{fmt(Math.abs(pnl))}
         </ThemedText>
@@ -145,6 +160,22 @@ function PositionRow({ item, palette }: { item: PortfolioPosition; palette: (typ
         )}
         <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>{item.product}</ThemedText>
       </View>
+      {trade && (
+        <View style={[styles.tradeInfoRow, { borderTopColor: palette.border }]}>
+          <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
+            Entry: <ThemedText style={{ color: palette.text }}>₹{fmt(trade.entryPrice)}</ThemedText>
+          </ThemedText>
+          <ThemedText style={[styles.rowDetail, { color: "#dc2626" }]}>
+            SL: <ThemedText style={{ color: "#dc2626", fontWeight: "700" }}>₹{fmt(trade.currentTrailSL)}</ThemedText>
+          </ThemedText>
+          <ThemedText style={[styles.rowDetail, { color: "#16a34a" }]}>
+            Target: <ThemedText style={{ color: "#16a34a", fontWeight: "700" }}>₹{fmt(trade.target1)}</ThemedText>
+          </ThemedText>
+          {trade.status === 'pending_entry' && (
+            <ThemedText style={[styles.rowDetail, { color: "#d97706" }]}>⏳ Pending fill</ThemedText>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -225,6 +256,7 @@ export default function PortfolioScreen() {
   const [orders, setOrders] = useState<PortfolioOrder[]>([]);
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
+  const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([]);
   const [pnlTrades, setPnlTrades] = useState<PnlTrade[]>([]);
   const [pnlCharges, setPnlCharges] = useState<{ charges_breakdown?: any } | null>(null);
   const [pnlLoading, setPnlLoading] = useState(false);
@@ -265,18 +297,20 @@ export default function PortfolioScreen() {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [f, prof, o, p, h] = await Promise.all([
+      const [f, prof, o, p, h, at] = await Promise.all([
         getPortfolioFunds(),
         getPortfolioProfile(),
         getPortfolioOrders(),
         getPortfolioPositions(),
         getPortfolioHoldings(),
+        getActiveTrades(),
       ]);
       setFunds(f);
       setProfile(prof);
       setOrders(dedupeOrders(o));
       setPositions(p);
       setHoldings(h);
+      setActiveTrades(at);
       setLastUpdated(new Date());
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load portfolio";
@@ -405,7 +439,15 @@ export default function PortfolioScreen() {
     activeTab === "orders"
       ? ({ item }: { item: PortfolioOrder }) => <OrderRow item={item} palette={palette} />
       : activeTab === "positions"
-      ? ({ item }: { item: PortfolioPosition }) => <PositionRow item={item} palette={palette} />
+      ? ({ item }: { item: PortfolioPosition }) => {
+          const trade = activeTrades.find(
+            t => item.instrument_token
+              ? t.instrumentKey === item.instrument_token
+              : t.instrumentKey.endsWith(`|${item.trading_symbol}`) ||
+                item.trading_symbol === t.instrumentKey.split('|')[1]
+          );
+          return <PositionRow item={item} trade={trade} palette={palette} />;
+        }
       : activeTab === "pnl"
       ? ({ item }: { item: PnlTrade }) => <PnlRow item={item} palette={palette} />
       : ({ item }: { item: PortfolioHolding }) => <HoldingRow item={item} palette={palette} />;
@@ -671,6 +713,14 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   sideText: { fontSize: 11, fontWeight: "700" },
+  tradeInfoRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+  },
 
   badge: {
     paddingHorizontal: 6,

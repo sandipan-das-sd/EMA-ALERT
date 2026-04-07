@@ -562,6 +562,27 @@ export interface BrokerageResult {
   };
 }
 
+export interface ActiveTrade {
+  tradeKey: string;
+  instrumentKey: string;
+  userId: string;
+  status: 'pending_entry' | 'in_trade' | string;
+  entryPrice: number;
+  initialSL: number;
+  currentTrailSL: number;
+  target1: number;
+  quantity: number;
+  product: string;
+  createdAt: number;
+}
+
+export async function getActiveTrades(): Promise<ActiveTrade[]> {
+  try {
+    const data = await request('/auto-trade/active');
+    return (data?.data ?? []) as ActiveTrade[];
+  } catch { return []; }
+}
+
 export async function getPortfolioFunds(): Promise<PortfolioFunds> {
   const data = await request('/portfolio/funds');
   return (data?.data ?? {}) as PortfolioFunds;
