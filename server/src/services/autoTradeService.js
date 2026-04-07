@@ -295,6 +295,23 @@ async function onCandleTick(instrumentKey, candles) {
         const candleHigh = Number(latestClosed[2]);
         const candleLow = Number(latestClosed[3]);
 
+        // Hard max-loss protection: ₹50 per trade
+        const MAX_LOSS_RS = 50;
+        const unrealizedLoss = trade.transactionType === 'BUY'
+          ? (trade.entryPrice - candleLow) * trade.quantity
+          : (candleHigh - trade.entryPrice) * trade.quantity;
+
+        if (unrealizedLoss >= MAX_LOSS_RS) {
+          console.log(
+            `[AutoTrade] ⛔ Max loss hit for ${instrumentKey}:` +
+            ` unrealized_loss=₹${unrealizedLoss.toFixed(2)} >= ₹${MAX_LOSS_RS} — force exiting`
+          );
+          const safeTrade = { ...trade, lastCandleTs: latestTs };
+          activeTrades.set(tradeKey, safeTrade);
+          await exitTrade(tradeKey, safeTrade);
+          return;
+        }
+
         // Capture OLD trail SL before any update — exit check must use this
         const oldTrailSL = trade.currentTrailSL;
         let newTrailSL = oldTrailSL;
