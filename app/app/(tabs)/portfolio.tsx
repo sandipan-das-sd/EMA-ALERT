@@ -419,6 +419,10 @@ export default function PortfolioScreen() {
   const exposure = eq?.exposure_margin ?? 0;
   const totalDayPnl = positions.reduce((sum, p) => sum + (p.pnl ?? 0), 0);
 
+  const openPositions = positions.filter(p => (p.quantity ?? 0) !== 0);
+  const closedPositions = positions.filter(p => (p.quantity ?? 0) === 0);
+  const sortedPositions = [...openPositions, ...closedPositions];
+
   const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: "positions", label: "Positions", count: openPositions.length },
     { key: "orders", label: "Orders", count: orders.length },
@@ -453,10 +457,6 @@ export default function PortfolioScreen() {
       : activeTab === "pnl"
       ? ({ item }: { item: PnlTrade }) => <PnlRow item={item} palette={palette} />
       : ({ item }: { item: PortfolioHolding }) => <HoldingRow item={item} palette={palette} />;
-
-  const openPositions = positions.filter(p => (p.quantity ?? 0) !== 0);
-  const closedPositions = positions.filter(p => (p.quantity ?? 0) === 0);
-  const sortedPositions = [...openPositions, ...closedPositions];
 
   const data =
     activeTab === "orders" ? orders
