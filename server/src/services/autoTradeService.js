@@ -152,7 +152,7 @@ async function onSignal(userId, instrumentKey, sig) {
 
   try {
     const User = (await import('../models/User.js')).default;
-    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct watchlistDirection');
+    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct watchlistDirection watchlistTargetPoints');
 
     if (!user?.autoTrade?.enabled) return;
     if (!user.upstoxAccessToken) {
@@ -190,9 +190,11 @@ async function onSignal(userId, instrumentKey, sig) {
       return;
     }
 
-    const target1 = transactionType === 'BUY'
-      ? entryPrice + slDistance
-      : entryPrice - slDistance;
+    // Use fixed target points if configured, otherwise 1:1 R/R
+    const fixedPts = user.watchlistTargetPoints?.get(instrumentKey) ?? 0;
+    const target1 = fixedPts > 0
+      ? (transactionType === 'BUY' ? entryPrice + fixedPts : entryPrice - fixedPts)
+      : (transactionType === 'BUY' ? entryPrice + slDistance : entryPrice - slDistance);
 
     const orderData = await placeOrder(user.upstoxAccessToken, {
       quantity,

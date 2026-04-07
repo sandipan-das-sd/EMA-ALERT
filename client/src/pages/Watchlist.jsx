@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { getWatchlist, removeFromWatchlist, updateWatchlistLots, updateWatchlistProduct, updateWatchlistDirection } from "../lib/api.js";
+import { getWatchlist, removeFromWatchlist, updateWatchlistLots, updateWatchlistProduct, updateWatchlistDirection, updateWatchlistTargetPoints } from "../lib/api.js";
 import Sidebar from "../components/Sidebar.jsx";
 import MarketClock from "../components/MarketClock.jsx";
 import {
@@ -187,6 +187,17 @@ export default function Watchlist({ user, setUser }) {
     }
   }
 
+  async function onUpdateTargetPoints(key, points) {
+    const val = parseFloat(points);
+    if (isNaN(val) || val < 0) return;
+    try {
+      await updateWatchlistTargetPoints(key, val);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, targetPoints: val } : it));
+    } catch (error) {
+      console.error("Error updating target points:", error);
+    }
+  }
+
   function openChart(item) {
     console.log("[Watchlist] Opening chart for item:", item);
 
@@ -302,6 +313,7 @@ export default function Watchlist({ user, setUser }) {
                   const showLots = lotSize > 1 || lots > 1;
                   const product = item.product ?? 'I';
                   const direction = item.direction ?? 'BUY';
+                  const targetPoints = item.targetPoints ?? 0;
                   return (
                     <div
                       className="flex items-center gap-3 flex-wrap"
@@ -372,6 +384,26 @@ export default function Watchlist({ user, setUser }) {
                                 : 'text-gray-500 border-gray-300 hover:bg-gray-50'
                           }`}
                         >SELL</button>
+                      </div>
+                      {/* Target points input */}
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Target pts:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.05"
+                          value={targetPoints || ''}
+                          placeholder="1R"
+                          className="w-16 text-xs border rounded px-1 py-0.5 text-center tabular-nums"
+                          onChange={(e) => onUpdateTargetPoints(item.key, e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {targetPoints > 0 && (
+                          <span className="text-xs text-amber-600 font-semibold">pts</span>
+                        )}
+                        {targetPoints === 0 && (
+                          <span className="text-xs text-gray-400">1R default</span>
+                        )}
                       </div>
                     </div>
                   );

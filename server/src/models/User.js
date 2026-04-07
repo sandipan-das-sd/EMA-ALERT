@@ -76,6 +76,12 @@ const userSchema = new mongoose.Schema(
       of: String,
       default: {},
     },
+    // Per-instrument fixed target points (0 = use 1:1 R/R default)
+    watchlistTargetPoints: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
     // Auto-trade configuration
     autoTrade: {
       enabled: { type: Boolean, default: false },

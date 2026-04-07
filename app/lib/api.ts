@@ -23,6 +23,7 @@ export interface WatchlistItem {
   lotSize?: number;
   product?: 'I' | 'D' | 'MTF';
   direction?: 'BUY' | 'SELL';
+  targetPoints?: number;
 }
 
 export interface MarketIndexItem {
@@ -307,6 +308,13 @@ export async function updateWatchlistDirection(instrumentKey: string, direction:
   return request(`/watchlist/${encodeURIComponent(instrumentKey)}/direction`, {
     method: "PATCH",
     body: { direction },
+  });
+}
+
+export async function updateWatchlistTargetPoints(instrumentKey: string, targetPoints: number) {
+  return request(`/watchlist/${encodeURIComponent(instrumentKey)}/target-points`, {
+    method: "PATCH",
+    body: { targetPoints },
   });
 }
 

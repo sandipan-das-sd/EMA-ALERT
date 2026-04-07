@@ -83,6 +83,7 @@ router.get("/", async (req, res) => {
       const lotSize = instrument?.lotSize ?? 1;
       const product = user.watchlistProduct?.get(key) ?? 'I';
       const direction = user.watchlistDirection?.get(key) ?? 'BUY';
+      const targetPoints = user.watchlistTargetPoints?.get(key) ?? 0;
 
       return {
         key,
@@ -98,6 +99,7 @@ router.get("/", async (req, res) => {
         lotSize,
         product,
         direction,
+        targetPoints,
       };
     });
 
@@ -141,6 +143,11 @@ router.post("/", async (req, res) => {
     user.watchlistDirection = user.watchlistDirection ?? new Map();
     user.watchlistDirection.set(instrumentKey, safeDirection);
     user.markModified('watchlistDirection');
+    // Store fixed target points (0 = use 1:1 R/R default)
+    const safeTargetPoints = Number(req.body.targetPoints) > 0 ? Number(req.body.targetPoints) : 0;
+    user.watchlistTargetPoints = user.watchlistTargetPoints ?? new Map();
+    user.watchlistTargetPoints.set(instrumentKey, safeTargetPoints);
+    user.markModified('watchlistTargetPoints');
     await user.save();
     // Trigger dynamic subscription update
     await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
@@ -168,6 +175,10 @@ router.delete("/:instrumentKey", async (req, res) => {
     if (user.watchlistDirection) {
       user.watchlistDirection.delete(instrumentKey);
       user.markModified('watchlistDirection');
+    }
+    if (user.watchlistTargetPoints) {
+      user.watchlistTargetPoints.delete(instrumentKey);
+      user.markModified('watchlistTargetPoints');
     }
     await user.save();
     // Trigger dynamic subscription update
@@ -236,6 +247,29 @@ router.patch("/:instrumentKey/direction", async (req, res) => {
     user.markModified('watchlistDirection');
     await user.save();
     res.json({ instrumentKey, direction });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH update target points for an existing watchlist item (0 = 1:1 R/R default)
+router.patch("/:instrumentKey/target-points", async (req, res) => {
+  try {
+    const { instrumentKey } = req.params;
+    const targetPoints = Number(req.body.targetPoints);
+    if (isNaN(targetPoints) || targetPoints < 0) {
+      return res.status(400).json({ message: "targetPoints must be a non-negative number" });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.watchlist.includes(instrumentKey)) {
+      return res.status(404).json({ message: "Instrument not in watchlist" });
+    }
+    user.watchlistTargetPoints = user.watchlistTargetPoints ?? new Map();
+    user.watchlistTargetPoints.set(instrumentKey, targetPoints);
+    user.markModified('watchlistTargetPoints');
+    await user.save();
+    res.json({ instrumentKey, targetPoints });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }

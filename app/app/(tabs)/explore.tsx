@@ -26,6 +26,7 @@ import {
   updateWatchlistLots,
   updateWatchlistProduct,
   updateWatchlistDirection,
+  updateWatchlistTargetPoints,
   type InstrumentSearchItem,
   type MarginResult,
   type OptionFilterMeta,
@@ -333,6 +334,14 @@ export default function WatchlistScreen() {
     } catch { showToast('Could not update direction'); }
   }
 
+  async function onUpdateTargetPoints(key: string, points: number) {
+    if (isNaN(points) || points < 0) return;
+    try {
+      await updateWatchlistTargetPoints(key, points);
+      setItems((prev) => prev.map((it) => it.key === key ? { ...it, targetPoints: points } : it));
+    } catch { showToast('Could not update target points'); }
+  }
+
   async function onRemove(key: string) {
     try {
       setMutatingKey(key);
@@ -467,6 +476,7 @@ export default function WatchlistScreen() {
     const showLotsBadge = lotSize > 1 || lots > 1;
     const product = item.product ?? 'I';
     const direction = item.direction ?? 'BUY';
+    const targetPoints = item.targetPoints ?? 0;
     const reqMargin = marginMap.get(item.key);
     return (
       <View style={[styles.watchItem, { backgroundColor: palette.card, borderColor: palette.border }]}>
@@ -573,6 +583,27 @@ export default function WatchlistScreen() {
             }]}>
             <ThemedText style={[styles.productBtnText, { color: direction === 'SELL' ? '#fff' : '#dc2626' }]}>SELL</ThemedText>
           </Pressable>
+        </View>
+        {/* Target points */}
+        <View style={[styles.lotsRow, { alignItems: 'center' }]}>
+          <ThemedText style={[styles.lotsText, { color: palette.muted }]}>Target pts:</ThemedText>
+          <TextInput
+            keyboardType="numeric"
+            value={targetPoints > 0 ? String(targetPoints) : ''}
+            placeholder="1R default"
+            placeholderTextColor={palette.muted}
+            onEndEditing={(e) => {
+              const v = parseFloat(e.nativeEvent.text);
+              onUpdateTargetPoints(item.key, isNaN(v) ? 0 : v);
+            }}
+            style={[
+              styles.input,
+              { color: palette.text, borderColor: palette.border, width: 90, fontSize: 13, paddingVertical: 2, textAlign: 'center' }
+            ]}
+          />
+          {targetPoints > 0 && (
+            <ThemedText style={{ color: '#d97706', fontWeight: '700', fontSize: 12 }}>pts</ThemedText>
+          )}
         </View>
       </View>
     );

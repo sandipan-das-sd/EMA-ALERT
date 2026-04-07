@@ -81,6 +81,11 @@ export async function updateWatchlistDirection(instrumentKey, direction) {
   return data;
 }
 
+export async function updateWatchlistTargetPoints(instrumentKey, targetPoints) {
+  const data = await request(`/api/watchlist/${encodeURIComponent(instrumentKey)}/target-points`, { method: 'PATCH', body: { targetPoints } });
+  return data;
+}
+
 export async function removeFromWatchlist(instrumentKey) {
   const data = await request(`/api/watchlist/${encodeURIComponent(instrumentKey)}`, { method: 'DELETE' });
   return data.watchlist || [];
