@@ -129,22 +129,24 @@ function OrderRow({ item, palette }: { item: PortfolioOrder; palette: (typeof Co
 
 function PositionRow({ item, trade, palette }: { item: PortfolioPosition; trade?: ActiveTrade; palette: (typeof Colors)["light"] }) {
   const pnl = item.pnl ?? (item.unrealised_profit ?? 0) + (item.realised_profit ?? 0);
+  const qty = item.quantity ?? 0;
   const pnlColor = pnl >= 0 ? "#16a34a" : "#dc2626";
-  const isShort = (item.quantity ?? 0) < 0;
+  const isShort = qty < 0;
+  const isClosed = qty === 0;
   return (
-    <View style={[styles.rowCard, { backgroundColor: palette.card, borderColor: palette.border }]}>
+    <View style={[styles.rowCard, { backgroundColor: palette.card, borderColor: palette.border, opacity: isClosed ? 0.5 : 1 }]}>
       <View style={styles.rowTop}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <ThemedText style={styles.rowSymbol}>{item.trading_symbol}</ThemedText>
-          <View style={[styles.sidePill, { backgroundColor: isShort ? "#dc262622" : "#16a34a22" }]}>
-            <ThemedText style={[styles.sideText, { color: isShort ? "#dc2626" : "#16a34a" }]}>
-              {isShort ? "SHORT" : "LONG"}
-            </ThemedText>
-          </View>
-        </View>
+        <ThemedText style={[styles.rowSymbol, { flex: 1 }]}>{item.trading_symbol}</ThemedText>
         <ThemedText style={[styles.pnlText, { color: pnlColor }]}>
           {pnl >= 0 ? "+" : ""}₹{fmt(Math.abs(pnl))}
         </ThemedText>
+      </View>
+      <View style={[styles.rowMid, { marginBottom: 2 }]}>
+        <View style={[styles.sidePill, { backgroundColor: isClosed ? palette.muted + "22" : isShort ? "#dc262622" : "#16a34a22" }]}>
+          <ThemedText style={[styles.sideText, { color: isClosed ? palette.muted : isShort ? "#dc2626" : "#16a34a" }]}>
+            {isClosed ? "CLOSED" : isShort ? "SHORT" : "LONG"}
+          </ThemedText>
+        </View>
       </View>
       <View style={styles.rowMid}>
         <ThemedText style={[styles.rowDetail, { color: palette.muted }]}>
@@ -418,7 +420,7 @@ export default function PortfolioScreen() {
   const totalDayPnl = positions.reduce((sum, p) => sum + (p.pnl ?? 0), 0);
 
   const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: "positions", label: "Positions", count: positions.length },
+    { key: "positions", label: "Positions", count: openPositions.length },
     { key: "orders", label: "Orders", count: orders.length },
     { key: "holdings", label: "Holdings", count: holdings.length },
     { key: "pnl", label: "P&L", count: 0 },
@@ -452,9 +454,13 @@ export default function PortfolioScreen() {
       ? ({ item }: { item: PnlTrade }) => <PnlRow item={item} palette={palette} />
       : ({ item }: { item: PortfolioHolding }) => <HoldingRow item={item} palette={palette} />;
 
+  const openPositions = positions.filter(p => (p.quantity ?? 0) !== 0);
+  const closedPositions = positions.filter(p => (p.quantity ?? 0) === 0);
+  const sortedPositions = [...openPositions, ...closedPositions];
+
   const data =
     activeTab === "orders" ? orders
-    : activeTab === "positions" ? positions
+    : activeTab === "positions" ? sortedPositions
     : activeTab === "pnl" ? pnlTrades
     : holdings;
 
@@ -534,7 +540,7 @@ export default function PortfolioScreen() {
 
             {/* Funds cards */}
             {!error && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.metricsRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.metricsRow} contentContainerStyle={{ gap: 8, paddingRight: 4 }}>
                 <MetricCard label="Available" value={fmtCurrency(available)} palette={palette} />
                 <MetricCard label="Used Margin" value={fmtCurrency(used)} palette={palette} />
                 <MetricCard label="Today Payin" value={fmtCurrency(payin)} palette={palette} />
@@ -662,7 +668,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
-    marginRight: 10,
     minWidth: 110,
     alignItems: "flex-start",
   },
