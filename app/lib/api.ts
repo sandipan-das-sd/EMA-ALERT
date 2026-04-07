@@ -583,6 +583,10 @@ export async function getActiveTrades(): Promise<ActiveTrade[]> {
   } catch { return []; }
 }
 
+export async function exitActiveTrade(instrumentKey: string): Promise<void> {
+  await request('/auto-trade/exit', { method: 'POST', body: { instrumentKey } });
+}
+
 export async function getPortfolioFunds(): Promise<PortfolioFunds> {
   const data = await request('/portfolio/funds');
   return (data?.data ?? {}) as PortfolioFunds;

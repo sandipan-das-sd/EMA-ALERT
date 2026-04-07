@@ -449,10 +449,22 @@ function getActiveTrades() {
   return out;
 }
 
+/**
+ * Manual exit — called from user action (e.g. Exit button in app).
+ * Finds the trade by instrumentKey for the given userId and places MARKET exit.
+ */
+async function manualExit(userId, instrumentKey) {
+  const tradeKey = `${userId}:${instrumentKey}`;
+  const trade = activeTrades.get(tradeKey);
+  if (!trade) throw new Error('No active trade found for this instrument');
+  await exitTrade(tradeKey, trade);
+}
+
 export const autoTradeService = {
   onSignal,
   onCandleTick,
   cancelAllPendingEntries,
   getActiveTrades,
   loadFromDb,
+  manualExit,
 };
