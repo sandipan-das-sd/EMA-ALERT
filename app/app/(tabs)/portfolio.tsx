@@ -17,6 +17,7 @@ import { useAuthContext } from "@/contexts/auth-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   getBrokerageDetails,
+  exitActiveTrade,
   getPnlCharges,
   getPnlData,
   getPnlMeta,
@@ -127,7 +128,12 @@ function OrderRow({ item, palette }: { item: PortfolioOrder; palette: (typeof Co
   );
 }
 
-function PositionRow({ item, trade, palette }: { item: PortfolioPosition; trade?: ActiveTrade; palette: (typeof Colors)["light"] }) {
+function PositionRow({ item, trade, onExit, palette }: {
+  item: PortfolioPosition;
+  trade?: ActiveTrade;
+  onExit?: (instrumentKey: string) => void;
+  palette: (typeof Colors)["light"];
+}) {
   const pnl = item.pnl ?? (item.unrealised_profit ?? 0) + (item.realised_profit ?? 0);
   const qty = item.quantity ?? 0;
   const pnlColor = pnl >= 0 ? "#16a34a" : "#dc2626";
@@ -177,6 +183,13 @@ function PositionRow({ item, trade, palette }: { item: PortfolioPosition; trade?
             <ThemedText style={[styles.rowDetail, { color: "#d97706" }]}>⏳ Pending fill</ThemedText>
           )}
         </View>
+      )}
+      {trade && !isClosed && onExit && (
+        <Pressable
+          onPress={() => onExit(trade.instrumentKey)}
+          style={[styles.exitBtn, { borderColor: "#dc2626" }]}>
+          <ThemedText style={styles.exitBtnText}>Exit Trade</ThemedText>
+        </Pressable>
       )}
     </View>
   );
@@ -259,6 +272,7 @@ export default function PortfolioScreen() {
   const [positions, setPositions] = useState<PortfolioPosition[]>([]);
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
   const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([]);
+  const [exitingKey, setExitingKey] = useState<string | null>(null);
   const [pnlTrades, setPnlTrades] = useState<PnlTrade[]>([]);
   const [pnlCharges, setPnlCharges] = useState<{ charges_breakdown?: any } | null>(null);
   const [pnlLoading, setPnlLoading] = useState(false);
@@ -407,6 +421,23 @@ export default function PortfolioScreen() {
     if (activeTab === 'pnl') fetchPnl(pnlSegment);
   }, [activeTab, pnlSegment, fetchPnl]);
 
+  const handleExit = useCallback(async (instrumentKey: string) => {
+    if (exitingKey) return;
+    setExitingKey(instrumentKey);
+    try {
+      await exitActiveTrade(instrumentKey);
+      showToast('Exit order placed');
+      // Remove from activeTrades immediately
+      setActiveTrades(prev => prev.filter(t => t.instrumentKey !== instrumentKey));
+      // Refresh portfolio after a short delay
+      setTimeout(() => fetchAll(true), 2000);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Exit failed');
+    } finally {
+      setExitingKey(null);
+    }
+  }, [exitingKey, fetchAll]);
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchAll(true);
@@ -452,7 +483,14 @@ export default function PortfolioScreen() {
               : t.instrumentKey.endsWith(`|${item.trading_symbol}`) ||
                 item.trading_symbol === t.instrumentKey.split('|')[1]
           );
-          return <PositionRow item={item} trade={trade} palette={palette} />;
+          return (
+            <PositionRow
+              item={item}
+              trade={trade}
+              onExit={exitingKey === (trade?.instrumentKey ?? '') ? undefined : handleExit}
+              palette={palette}
+            />
+          );
         }
       : activeTab === "pnl"
       ? ({ item }: { item: PnlTrade }) => <PnlRow item={item} palette={palette} />
@@ -726,6 +764,14 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
   },
+  exitBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  exitBtnText: { color: "#dc2626", fontWeight: "700", fontSize: 13 },
 
   badge: {
     paddingHorizontal: 6,
