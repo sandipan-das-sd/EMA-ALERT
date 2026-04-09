@@ -196,16 +196,23 @@ async function onSignal(userId, instrumentKey, sig) {
       ? (transactionType === 'BUY' ? entryPrice + fixedPts : entryPrice - fixedPts)
       : (transactionType === 'BUY' ? entryPrice + slDistance : entryPrice - slDistance);
 
+    // SL order: only activates when LTP reaches the trigger price (breakout entry)
+    // BUY: fires only when price rises to sig.high; SELL: fires when price drops to sig.low
+    const buffer = parseFloat((entryPrice * 0.002).toFixed(2)); // 0.2% buffer ensures fill
+    const limitPriceForSL = transactionType === 'BUY'
+      ? parseFloat((entryPrice + buffer).toFixed(2))
+      : parseFloat((entryPrice - buffer).toFixed(2));
+
     const orderData = await placeOrder(user.upstoxAccessToken, {
       quantity,
       product,
       validity: 'DAY',
-      price: entryPrice,
+      price: limitPriceForSL,
       instrument_token: instrumentKey,
-      order_type: 'LIMIT',
+      order_type: 'SL',
       transaction_type: transactionType,
       disclosed_quantity: 0,
-      trigger_price: 0,
+      trigger_price: entryPrice,
       is_amo: false,
       slice: false,
     });
@@ -234,8 +241,8 @@ async function onSignal(userId, instrumentKey, sig) {
     await saveTrade(tradeKey, newTrade);
 
     console.log(
-      `[AutoTrade] 📈 LIMIT ${transactionType} placed` +
-      ` | ${instrumentKey} | qty=${quantity} | entry=${entryPrice}` +
+      `[AutoTrade] 📈 SL-BREAKOUT ${transactionType} placed` +
+      ` | ${instrumentKey} | qty=${quantity} | trigger=${entryPrice} | limit=${limitPriceForSL}` +
       ` | SL=${initialSL} | T1=${target1} | orderId=${orderId}`
     );
   } catch (err) {
