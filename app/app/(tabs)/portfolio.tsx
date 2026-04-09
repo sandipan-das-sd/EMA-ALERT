@@ -18,6 +18,7 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   getBrokerageDetails,
   exitActiveTrade,
+  getAutoTradeSettings,
   getPnlCharges,
   getPnlData,
   getPnlMeta,
@@ -27,6 +28,7 @@ import {
   getPortfolioPositions,
   getActiveTrades,
   getPortfolioProfile,
+  updateAutoTradeSettings,
   type ActiveTrade,
   type BrokerageResult,
   type PortfolioFunds,
@@ -266,6 +268,8 @@ export default function PortfolioScreen() {
   const { user } = useAuthContext();
 
   const [activeTab, setActiveTab] = useState<TabKey>("positions");
+  const [autoTradeOn, setAutoTradeOn] = useState(false);
+  const [autoTradeToggling, setAutoTradeToggling] = useState(false);
   const [funds, setFunds] = useState<PortfolioFunds | null>(null);
   const [profile, setProfile] = useState<PortfolioProfile | null>(null);
   const [orders, setOrders] = useState<PortfolioOrder[]>([]);
@@ -402,6 +406,28 @@ export default function PortfolioScreen() {
       // ignore ws init errors
     }
   }, [user?.id, dedupeOrders]);
+
+  // Load auto-trade toggle state on mount
+  useEffect(() => {
+    getAutoTradeSettings()
+      .then(s => setAutoTradeOn(s.enabled))
+      .catch(() => {});
+  }, []);
+
+  const handleAutoTradeToggle = useCallback(async () => {
+    if (autoTradeToggling) return;
+    setAutoTradeToggling(true);
+    const next = !autoTradeOn;
+    try {
+      await updateAutoTradeSettings({ enabled: next });
+      setAutoTradeOn(next);
+      showToast(next ? 'Auto-trade ON — orders will be placed' : 'Auto-trade OFF — alerts only, no orders');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to update auto-trade');
+    } finally {
+      setAutoTradeToggling(false);
+    }
+  }, [autoTradeOn, autoTradeToggling]);
 
   useEffect(() => {
     fetchAll();
@@ -554,6 +580,29 @@ export default function PortfolioScreen() {
               </View>
             </View>
 
+            {/* Auto-trade toggle */}
+            <Pressable
+              onPress={handleAutoTradeToggle}
+              disabled={autoTradeToggling}
+              style={[styles.autoTradeBtn, {
+                backgroundColor: autoTradeOn ? '#16a34a' : palette.card,
+                borderColor: autoTradeOn ? '#16a34a' : palette.border,
+                opacity: autoTradeToggling ? 0.6 : 1,
+              }]}>
+              <ThemedText style={{ fontSize: 18 }}>{autoTradeOn ? '🤖' : '⏸️'}</ThemedText>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <ThemedText style={[styles.autoTradeBtnTitle, { color: autoTradeOn ? '#fff' : palette.text }]}>
+                  Auto-Trade {autoTradeOn ? 'ON' : 'OFF'}
+                </ThemedText>
+                <ThemedText style={{ fontSize: 11, color: autoTradeOn ? '#bbf7d0' : palette.muted }}>
+                  {autoTradeOn ? 'Orders will be placed on EMA signals' : 'Alerts only — no orders placed'}
+                </ThemedText>
+              </View>
+              <ThemedText style={[styles.autoTradeToggleLabel, { color: autoTradeOn ? '#fff' : palette.muted }]}>
+                {autoTradeToggling ? '...' : autoTradeOn ? 'Tap to pause' : 'Tap to enable'}
+              </ThemedText>
+            </Pressable>
+
             {/* Error banner */}
             {error && (
               <View style={[styles.errorBanner, { backgroundColor: "#dc262622", borderColor: "#dc2626" }]}>
@@ -680,6 +729,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
   },
+  autoTradeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 12,
+    marginBottom: 12,
+  },
+  autoTradeBtnTitle: { fontSize: 15, fontWeight: '700' },
+  autoTradeToggleLabel: { fontSize: 11, fontWeight: '600' },
 
   errorBanner: {
     borderWidth: 1,
