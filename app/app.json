@@ -2,6 +2,7 @@
   "expo": {
     "name": "EMA ALERT SYSTEM",
     "slug": "ema-alert-system",
+    "owner": "gyanoda_studybloom24",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "appVersion"
