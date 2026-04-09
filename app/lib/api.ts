@@ -391,6 +391,33 @@ export async function dismissAllAlerts() {
   });
 }
 
+export interface AlertLog {
+  _id?: string;
+  instrumentKey?: string;
+  strategy?: string;
+  timeframe?: string;
+  status?: string;
+  candle?: {
+    ts?: number;
+    open?: number;
+    high?: number;
+    low?: number;
+    close?: number;
+  };
+  ema?: number;
+  crossDetectedAt?: string | number;
+  notificationSentAt?: string | number;
+  createdAt?: string | number;
+}
+
+export async function fetchAlertLogs(options: { status?: string; limit?: number } = {}): Promise<AlertLog[]> {
+  const params = new URLSearchParams();
+  if (options.status) params.set('status', options.status);
+  params.set('limit', String(options.limit ?? 200));
+  const data = await request(`/alerts?${params.toString()}`);
+  return (data?.alerts ?? []) as AlertLog[];
+}
+
 export async function searchInstruments(query: string, options: { segments?: string[]; limit?: number } = {}) {
   const params = new URLSearchParams();
   params.set("q", query);
