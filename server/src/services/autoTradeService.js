@@ -302,9 +302,9 @@ async function onCandleTick(instrumentKey, candles) {
         let newTrailSL = oldTrailSL;
 
         if (trade.transactionType === 'SELL') {
-          // Short trade: ratchet trail SL downward only
-          if (candleLow < newTrailSL) {
-            newTrailSL = candleLow;
+          // Short trade: ratchet trail SL downward using candle HIGH (lower highs as price falls)
+          if (candleHigh < newTrailSL) {
+            newTrailSL = candleHigh;
             console.log(
               `[AutoTrade] ↓ Trail SL (SELL) for ${instrumentKey}: ${oldTrailSL} → ${newTrailSL}`
             );
@@ -331,9 +331,9 @@ async function onCandleTick(instrumentKey, candles) {
             await exitTrade(tradeKey, updatedTrade);
           }
         } else {
-          // Long trade (BUY): ratchet trail SL upward only
-          if (candleHigh > newTrailSL) {
-            newTrailSL = candleHigh;
+          // Long trade (BUY): ratchet trail SL upward using candle LOW (higher lows as price rises)
+          if (candleLow > newTrailSL) {
+            newTrailSL = candleLow;
             console.log(
               `[AutoTrade] ↑ Trail SL (BUY) for ${instrumentKey}: ${oldTrailSL} → ${newTrailSL}`
             );
