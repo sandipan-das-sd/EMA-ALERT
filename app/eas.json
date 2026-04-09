@@ -21,7 +21,7 @@
     },
     "apk": {
       "distribution": "internal",
-      "channel": "preview",
+      "channel": "partik",
       "android": {
         "buildType": "apk"
       }

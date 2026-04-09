@@ -2,14 +2,14 @@
   "expo": {
     "name": "EMA ALERT SYSTEM",
     "slug": "ema-alert-system",
-    "owner": "gyanoda_studybloom24",
+    "owner": "solvitwbjee_2024",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
       "enabled": true,
-      "url": "https://u.expo.dev/ac4f5a3e-7b48-496c-b191-0343fb47552a",
+      "url": "https://u.expo.dev/32529c24-a92d-4c52-ad6e-3a8acc5df7e5",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
@@ -59,7 +59,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "ac4f5a3e-7b48-496c-b191-0343fb47552a"
+        "projectId": "32529c24-a92d-4c52-ad6e-3a8acc5df7e5"
       }
     }
   }
