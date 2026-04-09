@@ -3,8 +3,8 @@ const DEFAULT_WS_URL = "ws://localhost:4000/ws/ticker";
 
 function normalizeApiBase(input?: string) {
   const raw = (input || DEFAULT_API_BASE).trim().replace(/\/$/, "");
-  // Allow users to set either domain root (https://trade.gyanoda.in)
-  // or full api path (https://trade.gyanoda.in/api).
+  // Allow users to set either domain root (https://pratik.gyanoda.in)
+  // or full api path (https://pratik.gyanoda.in/api).
   return raw.endsWith("/api") ? raw : `${raw}/api`;
 }
 

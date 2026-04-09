@@ -612,7 +612,7 @@ export function startAlertEngine({
               console.warn(
                 `[AlertEngine] ⚠️  All ${allKeys.length} instruments failed to load. Check Upstox token validity.`
               );
-              console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://trade.gyanoda.in/login');
+              console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://pratik.gyanoda.in/login');
               lastNoInstrumentsWarnAt = now;
             }
           } else {
@@ -746,7 +746,7 @@ export function startAlertEngine({
             `\n[AlertEngine] ⚠️  CRITICAL: ALL ${failedKeys.size} instruments failed to fetch!`
           );
           console.warn(`[AlertEngine] Likely cause: Invalid/expired Upstox API token (401 error)`);
-          console.warn(`[AlertEngine] Action: Please refresh your Upstox token at http://trade.gyanoda.in/login`);
+          console.warn(`[AlertEngine] Action: Please refresh your Upstox token at http://pratik.gyanoda.in/login`);
           console.warn(`[AlertEngine] Will retry with longer intervals to avoid spam.\n`);
           lastCriticalWarnAt = now;
         }
