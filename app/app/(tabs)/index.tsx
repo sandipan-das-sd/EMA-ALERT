@@ -423,7 +423,7 @@ export default function HomeScreen() {
         imageStyle={{ opacity: 0.12, resizeMode: 'cover' }}
         style={[styles.hero, { backgroundColor: palette.card, borderColor: palette.border }]}
       >
-        <ThemedText type="title" style={styles.heroTitle}>EMA ALERT SYSTEM</ThemedText>
+        <ThemedText type="title" style={styles.heroTitle}>The House Always Wins</ThemedText>
         <ThemedText style={{ color: palette.muted, marginTop: 6 }}>
           Smart market monitoring with live indices, watchlist prices, and EMA crossover alerts.
         </ThemedText>
