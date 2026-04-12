@@ -161,3 +161,112 @@ export function getWhatsAppPhoneNumbers() {
   // Split by comma and trim whitespace
   return phoneNumbers.split(',').map(num => num.trim()).filter(num => num.length > 0);
 }
+
+/**
+ * Send VWAP alert via WhatsApp using vwap_alert template
+ * Template variables:
+ *   var_1 = instrument name
+ *   var_2 = entry price (candle HIGH)
+ *   var_3 = stoploss (candle LOW)
+ *   var_4 = target (1:1 R/R)
+ */
+export async function sendVwapWhatsAppAlert({
+  instrumentName,
+  entry,
+  stoploss,
+  target,
+  phoneNumbers = [],
+}) {
+  const now = Date.now();
+  const cooldownKey = `vwap:${instrumentName}`;
+  const lastSent = lastSentTime.get(cooldownKey);
+  if (lastSent && (now - lastSent) < COOLDOWN_MS) {
+    return { success: false, message: 'Cooldown active' };
+  }
+
+  if (process.env.WHATSAPP_ENABLED !== 'true') {
+    return { success: false, message: 'WhatsApp notifications disabled' };
+  }
+
+  const authKey = process.env.MSG91_AUTH_KEY;
+  const integratedNumber = process.env.MSG91_INTEGRATED_NUMBER;
+
+  if (!authKey || !integratedNumber) {
+    return { success: false, message: 'Missing MSG91 configuration' };
+  }
+
+  if (!phoneNumbers || phoneNumbers.length === 0) {
+    return { success: false, message: 'No phone numbers provided' };
+  }
+
+  try {
+    const myHeaders = new Headers();
+    myHeaders.append("Content-Type", "application/json");
+    myHeaders.append("authkey", authKey);
+
+    const payload = {
+      "integrated_number": integratedNumber,
+      "content_type": "template",
+      "payload": {
+        "messaging_product": "whatsapp",
+        "type": "template",
+        "template": {
+          "name": "vwap_alert",
+          "language": {
+            "code": "en",
+            "policy": "deterministic"
+          },
+          "namespace": "919bcb25_8f17_4aeb_a677_0fe2da42cf09",
+          "to_and_components": [
+            {
+              "to": phoneNumbers,
+              "components": {
+                "body_var_1": {
+                  "type": "text",
+                  "value": instrumentName,
+                  "parameter_name": "var_1"
+                },
+                "body_var_2": {
+                  "type": "text",
+                  "value": entry?.toFixed(2) || "0",
+                  "parameter_name": "var_2"
+                },
+                "body_var_3": {
+                  "type": "text",
+                  "value": stoploss?.toFixed(2) || "0",
+                  "parameter_name": "var_3"
+                },
+                "body_var_4": {
+                  "type": "text",
+                  "value": target?.toFixed(2) || "0",
+                  "parameter_name": "var_4"
+                }
+              }
+            }
+          ]
+        }
+      }
+    };
+
+    console.log(`[WhatsApp] Sending VWAP alert for ${instrumentName} to ${phoneNumbers.length} number(s)`);
+
+    const response = await fetch(
+      "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/",
+      { method: 'POST', headers: myHeaders, body: JSON.stringify(payload), redirect: 'follow' }
+    );
+
+    const result = await response.text();
+
+    if (response.ok) {
+      console.log(`[WhatsApp] ✓ VWAP alert sent for ${instrumentName}:`, result);
+      lastSentTime.set(cooldownKey, now);
+      return { success: true, message: 'VWAP WhatsApp notification sent', response: result };
+    } else {
+      console.error(`[WhatsApp] ✗ VWAP alert failed for ${instrumentName}:`, result);
+      return { success: false, message: 'Failed to send VWAP WhatsApp', error: result };
+    }
+  } catch (error) {
+    console.error('[WhatsApp] VWAP alert error:', error.message);
+    return { success: false, message: 'Error sending VWAP WhatsApp', error: error.message };
+  }
+}

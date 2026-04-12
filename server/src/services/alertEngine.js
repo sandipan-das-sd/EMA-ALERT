@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import Alert from "../models/Alert.js";
-import { sendWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
+import { sendWhatsAppAlert, sendVwapWhatsAppAlert, getWhatsAppPhoneNumbers } from "./whatsappNotification.js";
 import { enqueueBufferedVoiceAlert } from "./voiceNotification.js";
 import { sendPushAlertToUser } from "./pushNotification.js";
 import { sendAlertEmailToUser } from "./emailNotification.js";
@@ -48,6 +48,45 @@ function calculateEMA(values, length = 20) {
   return emaValues;
 }
 
+/**
+ * Calculate VWAP for intraday candles (resets each day).
+ * Upstox candle format: [timestamp, open, high, low, close, volume, oi]
+ * Returns array of { ts, vwap } for each candle.
+ */
+function calculateVWAP(candles) {
+  if (!candles || candles.length === 0) return [];
+
+  const results = [];
+  let cumTPV = 0; // cumulative (typical_price × volume)
+  let cumVol = 0; // cumulative volume
+  let currentDay = null;
+
+  for (const c of candles) {
+    const ts = Date.parse(c[0]);
+    const high = Number(c[2]);
+    const low = Number(c[3]);
+    const close = Number(c[4]);
+    const volume = Number(c[5]) || 0;
+
+    // Detect day change — reset VWAP
+    const day = toIstDateString(ts);
+    if (day !== currentDay) {
+      cumTPV = 0;
+      cumVol = 0;
+      currentDay = day;
+    }
+
+    const typicalPrice = (high + low + close) / 3;
+    cumTPV += typicalPrice * volume;
+    cumVol += volume;
+
+    const vwap = cumVol > 0 ? cumTPV / cumVol : close;
+    results.push({ ts, vwap });
+  }
+
+  return results;
+}
+
 export function startAlertEngine({
   apiBase,
   accessToken,
@@ -77,6 +116,7 @@ export function startAlertEngine({
   const permanentlyFailedUntil = new Map();
   const historicalCache = new Map();
   const sentAlerts = new Map();
+  const sentVwapAlerts = new Map(); // Separate dedup for VWAP alerts
 
   const SENT_ALERT_TTL_MS = (() => {
     const v = parseInt(process.env.ALERT_SENT_TTL_MS, 10);
@@ -165,13 +205,15 @@ export function startAlertEngine({
       pruneMapToSize(workingKeyCache, MAX_CACHE_KEYS);
       pruneMapToSize(failureCount, MAX_CACHE_KEYS);
       pruneMapToSize(historicalCache, MAX_CACHE_KEYS);
+      pruneMapToSize(sentVwapAlerts, MAX_SENT_ALERTS);
       lastPruneAt = now;
     }
 
     const today = toIstDateString(Date.now());
     if (today && today !== lastCleanupDate) {
-      console.log(`[AlertEngine] Daily cleanup: clearing ${sentAlerts.size} sent alerts`);
+      console.log(`[AlertEngine] Daily cleanup: clearing ${sentAlerts.size} EMA + ${sentVwapAlerts.size} VWAP sent alerts`);
       sentAlerts.clear();
+      sentVwapAlerts.clear();
       historicalCache.clear();
       permanentlyFailedUntil.clear();
       lastCleanupDate = today;
@@ -583,6 +625,115 @@ export function startAlertEngine({
     return signals;
   };
 
+  /**
+   * Evaluate VWAP crossover signals (alert only, no auto-trade).
+   * Signal: closed green candle crosses above VWAP.
+   */
+  const evaluateVWAP = (candles, instrumentKey) => {
+    // Sort ascending
+    const sorted = [...candles].reverse();
+    if (sorted.length < 2) return [];
+
+    // VWAP is intraday only — use only today's candles
+    const todayIst = toIstDateString(Date.now());
+    const todayCandles = sorted.filter((c) => {
+      const ts = Date.parse(c[0]);
+      return Number.isFinite(ts) && toIstDateString(ts) === todayIst;
+    });
+
+    if (todayCandles.length < 2) return [];
+
+    const vwapValues = calculateVWAP(todayCandles);
+    if (vwapValues.length < 2) return [];
+
+    const timeframeMs = 15 * 60 * 1000;
+    const now = Date.now();
+    const vwapSignals = [];
+
+    // Check last few candles
+    const maxCheck = Math.min(6, todayCandles.length);
+
+    for (let k = 0; k < maxCheck; k++) {
+      const idx = todayCandles.length - 1 - k;
+      if (idx < 1) break;
+
+      const candle = todayCandles[idx];
+      const open = Number(candle[1]);
+      const high = Number(candle[2]);
+      const low = Number(candle[3]);
+      const close = Number(candle[4]);
+      const candleStartTs = Date.parse(candle[0]);
+      if (isNaN(candleStartTs)) continue;
+      const candleEndTs = candleStartTs + timeframeMs;
+
+      // Market hours check
+      const candleStartIst = new Date(candleStartTs + IST_OFFSET_MS);
+      const istHour = candleStartIst.getUTCHours();
+      const istMin = candleStartIst.getUTCMinutes();
+      const afterMarketOpen = istHour > 9 || (istHour === 9 && istMin >= 15);
+      const beforeMarketLastStart = istHour < 15 || (istHour === 15 && istMin <= 15);
+      if (!afterMarketOpen || !beforeMarketLastStart) continue;
+
+      const candleClosed = now >= candleEndTs;
+      if (!candleClosed) continue;
+
+      const isGreen = close > open;
+      const vwap = vwapValues[idx]?.vwap;
+      const prevVwap = vwapValues[idx - 1]?.vwap;
+      if (vwap == null || prevVwap == null) continue;
+
+      // Previous candle closed below VWAP, current candle closes above VWAP
+      const prevClose = Number(todayCandles[idx - 1][4]);
+      const prevWasBelow = prevClose < prevVwap;
+      const nowAbove = close > vwap;
+
+      // VWAP crosses through candle range (same logic as EMA)
+      const vwapIntersects = vwap >= low && vwap <= high;
+
+      if (isGreen && prevWasBelow && nowAbove && vwapIntersects) {
+        const alertId = `vwap::${instrumentKey}::${candleStartTs}`;
+        const alreadySentAt = sentVwapAlerts.get(alertId);
+        if (alreadySentAt && Date.now() - alreadySentAt < SENT_ALERT_TTL_MS) {
+          continue;
+        }
+
+        sentVwapAlerts.set(alertId, Date.now());
+
+        const startIstDate = new Date(candleStartTs + IST_OFFSET_MS);
+        const startIstStr = `${startIstDate.getUTCFullYear()}-${String(
+          startIstDate.getUTCMonth() + 1
+        ).padStart(2, "0")}-${String(startIstDate.getUTCDate()).padStart(
+          2, "0"
+        )}T${String(startIstDate.getUTCHours()).padStart(2, "0")}:${String(
+          startIstDate.getUTCMinutes()
+        ).padStart(2, "0")}:00 IST`;
+
+        console.log(
+          `\n📊 [AlertEngine] VWAP SIGNAL for ${instrumentKey} at ${startIstStr}\n` +
+          `   Open: ${open.toFixed(2)} | Close: ${close.toFixed(2)} | VWAP: ${vwap.toFixed(2)}\n` +
+          `   Entry: ${high.toFixed(2)} (HIGH) | SL: ${low.toFixed(2)} (LOW) | Target: ${(high + (high - low)).toFixed(2)} (1:1)\n` +
+          `   Prev close: ${prevClose.toFixed(2)} (below VWAP ${prevVwap.toFixed(2)})`
+        );
+
+        vwapSignals.push({
+          ts: candleStartTs,
+          open,
+          high,
+          low,
+          close,
+          vwap,
+          entry: high,                          // Buy above candle HIGH
+          stoploss: low,                        // SL at candle LOW
+          target: high + (high - low),          // 1:1 R/R
+          candleEndTime: candleEndTs,
+          crossDetectedAt: Date.now(),
+        });
+      }
+    }
+
+    return vwapSignals;
+  };
+
   async function tick() {
     if (stopRef.stopped) return;
 
@@ -643,6 +794,7 @@ export function startAlertEngine({
       }
 
       const keyToSignal = new Map();
+      const keyToVwapSignal = new Map();
       const successfulKeys = new Set();
       const failedKeys = new Map();
       const batchSize = 10;
@@ -725,6 +877,16 @@ export function startAlertEngine({
                 
                 if (signals && signals.length > 0) {
                   keyToSignal.set(origKey, signals);
+                }
+
+                // VWAP evaluation (alert-only, no auto-trade)
+                try {
+                  const vwapSigs = evaluateVWAP(data, origKey);
+                  if (vwapSigs && vwapSigs.length > 0) {
+                    keyToVwapSignal.set(origKey, vwapSigs);
+                  }
+                } catch (vwapErr) {
+                  console.error(`[AlertEngine] VWAP error for ${origKey}:`, vwapErr.message);
                 }
 
                 // Auto-trade: monitor active trades on every candle tick
@@ -1009,6 +1171,163 @@ export function startAlertEngine({
           }).catch(err => {
             const dbDuration = Date.now() - dbStartTime;
             console.error(`[AlertEngine] ❌ Database save error (${dbDuration}ms):`, err.message);
+          });
+        }
+      }
+
+      // ── VWAP Alerts (notification-only, no auto-trade) ──
+      if (keyToVwapSignal.size > 0) {
+        console.log(`\n[AlertEngine] Processing ${keyToVwapSignal.size} VWAP alert(s)...`);
+
+        const whatsappNumbers = getWhatsAppPhoneNumbers();
+
+        for (const [instrumentKey, signals] of keyToVwapSignal) {
+          let instrumentName = instrumentKey;
+          let instrument = null;
+
+          try {
+            instrument = instrumentsSearchService.getInstrument(instrumentKey);
+            if (instrument) {
+              instrumentName = instrument.tradingSymbol || instrument.name || instrumentKey;
+            }
+          } catch (e) {
+            // Ignore
+          }
+
+          for (const sig of signals) {
+            // Broadcast to all subscribed users
+            for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
+              if (watchlistSet && watchlistSet.has(instrumentKey)) {
+                try {
+                  if (typeof broadcastAlert === 'function') {
+                    broadcastAlert({
+                      userId,
+                      instrumentKey,
+                      instrumentName,
+                      timeframe: '15m',
+                      strategy: 'vwap_cross_up',
+                      candle: {
+                        ts: sig.ts,
+                        open: sig.open,
+                        high: sig.high,
+                        low: sig.low,
+                        close: sig.close,
+                      },
+                      vwap: sig.vwap,
+                      entry: sig.entry,
+                      stoploss: sig.stoploss,
+                      target: sig.target,
+                      crossDetectedAt: sig.crossDetectedAt,
+                      notificationSentAt: Date.now(),
+                      createdAt: new Date().toISOString(),
+                    });
+                  }
+
+                  // Push notification
+                  try {
+                    const User = (await import('../models/User.js')).default;
+                    const userForPush = await User.findById(userId).select('pushToken');
+                    if (userForPush?.pushToken) {
+                      sendPushAlertToUser(userForPush, {
+                        instrumentKey,
+                        instrumentName,
+                        entry: sig.entry,
+                        stoploss: sig.stoploss,
+                        target: sig.target,
+                        strategy: 'vwap_cross_up',
+                      }, { pushNotificationsEnabled: true }).catch(err => {
+                        console.warn(`[AlertEngine] VWAP push error for ${instrumentName}:`, err?.message);
+                      });
+                    }
+                  } catch (err) {
+                    console.warn(`[AlertEngine] VWAP push lookup error:`, err?.message);
+                  }
+                } catch (e) {
+                  console.warn(`[AlertEngine] VWAP broadcast failed:`, e?.message);
+                }
+              }
+            }
+
+            // WhatsApp VWAP alert (sent once per signal, not per user)
+            if (whatsappNumbers.length > 0) {
+              sendVwapWhatsAppAlert({
+                instrumentName,
+                entry: sig.entry,
+                stoploss: sig.stoploss,
+                target: sig.target,
+                phoneNumbers: whatsappNumbers,
+              }).then(result => {
+                if (result.success) {
+                  console.log(`[AlertEngine] ✓ VWAP WhatsApp sent for ${instrumentName}`);
+                } else {
+                  console.error(`[AlertEngine] ✗ VWAP WhatsApp failed for ${instrumentName}:`, result.message);
+                }
+              }).catch(err => {
+                console.error(`[AlertEngine] ✗ VWAP WhatsApp error for ${instrumentName}:`, err.message);
+              });
+            }
+          }
+        }
+
+        // Save VWAP alerts to database
+        const vwapOps = [];
+        for (const [userId, keys] of userMap) {
+          for (const k of keys) {
+            const sigs = keyToVwapSignal.get(k) || [];
+            if (!sigs.length) continue;
+
+            const currentSet = dynamicSubscriptionManager.userWatchlists.get(userId);
+            if (!currentSet || !currentSet.has(k)) continue;
+
+            for (const sig of sigs) {
+              vwapOps.push(
+                Alert.updateOne(
+                  {
+                    userId,
+                    instrumentKey: k,
+                    "candle.ts": sig.ts,
+                    strategy: "vwap_cross_up",
+                  },
+                  {
+                    $setOnInsert: {
+                      userId,
+                      instrumentKey: k,
+                      timeframe: "15m",
+                      strategy: "vwap_cross_up",
+                      candle: {
+                        ts: sig.ts,
+                        open: sig.open,
+                        high: sig.high,
+                        low: sig.low,
+                        close: sig.close,
+                      },
+                      vwap: sig.vwap,
+                      entry: sig.entry,
+                      stoploss: sig.stoploss,
+                      target: sig.target,
+                      crossDetectedAt: new Date(sig.crossDetectedAt),
+                      notificationSentAt: new Date(),
+                      status: "active",
+                      createdAt: new Date(),
+                    },
+                  },
+                  { upsert: true }
+                )
+              );
+            }
+          }
+        }
+
+        if (vwapOps.length) {
+          Promise.allSettled(vwapOps).then(results => {
+            const successful = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected');
+            console.log(`[AlertEngine] 💾 VWAP DB: ${successful}/${vwapOps.length} saved`);
+            if (failed.length > 0) {
+              console.error(`[AlertEngine] ⚠️  ${failed.length} VWAP DB saves failed`);
+            }
+          }).catch(err => {
+            console.error(`[AlertEngine] ❌ VWAP DB error:`, err.message);
           });
         }
       }
