@@ -220,32 +220,32 @@ export function startAlertEngine({
     }
   };
 
-  const buildHistoricalURL = (instrumentKey, date) => {
+  const buildHistoricalURL = (instrumentKey, date, intervalMinutes = 15) => {
     const base = apiBase.replace(/\/$/, "");
     const hasV3 = base.endsWith("/v3");
     const prefix = hasV3 ? base : `${base}/v3`;
     const dateStr = date.toISOString().split("T")[0];
     return `${prefix}/historical-candle/${encodeURIComponent(
       instrumentKey
-    )}/minutes/15/${dateStr}/${dateStr}`;
+    )}/minutes/${intervalMinutes}/${dateStr}/${dateStr}`;
   };
 
-  const buildIntradayURL = (instrumentKey) => {
+  const buildIntradayURL = (instrumentKey, intervalMinutes = 15) => {
     const base = apiBase.replace(/\/$/, "");
     const hasV3 = base.endsWith("/v3");
     const prefix = hasV3 ? base : `${base}/v3`;
     return `${prefix}/historical-candle/intraday/${encodeURIComponent(
       instrumentKey
-    )}/minutes/15`;
+    )}/minutes/${intervalMinutes}`;
   };
 
-  const fetchHistoricalCandles = async (instrumentKey, minCandlesNeeded) => {
+  const fetchHistoricalCandles = async (instrumentKey, minCandlesNeeded, intervalMinutes = 15) => {
     if (!minCandlesNeeded || minCandlesNeeded <= 0) {
       return [];
     }
 
     const todayKey = toIstDateString(Date.now());
-    const cacheKey = `${instrumentKey}::${todayKey}`;
+    const cacheKey = `${instrumentKey}::${todayKey}::${intervalMinutes}m`;
     const cached = historicalCache.get(cacheKey);
     if (cached && cached.length >= minCandlesNeeded) {
       return [...cached];
@@ -265,7 +265,7 @@ export function startAlertEngine({
       if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
       try {
-        const url = buildHistoricalURL(instrumentKey, date);
+        const url = buildHistoricalURL(instrumentKey, date, intervalMinutes);
         const r = await fetch(url, { headers: getHeaders() });
 
         if (r.ok) {
@@ -294,10 +294,10 @@ export function startAlertEngine({
     return allCandles;
   };
 
-  const tryIntraday = async (key, variants) => {
+  const tryIntraday = async (key, variants, intervalMinutes = 15) => {
     for (const v of variants) {
       try {
-        const url = buildIntradayURL(v);
+        const url = buildIntradayURL(v, intervalMinutes);
         const r = await fetch(url, { headers: getHeaders() });
 
         if (r.status === 404) continue;
@@ -380,7 +380,8 @@ export function startAlertEngine({
     candles,
     instrumentKey,
     workingKey,
-    maxCandlesToCheck = 12
+    maxCandlesToCheck = 12,
+    timeframeMinutes = 15
   ) => {
     let sortedCandles = [...candles].reverse();
 
@@ -411,7 +412,7 @@ export function startAlertEngine({
 
     const historicalCandles =
       desiredHistoryCount > 0
-        ? await fetchHistoricalCandles(workingKey, desiredHistoryCount)
+        ? await fetchHistoricalCandles(workingKey, desiredHistoryCount, timeframeMinutes)
         : [];
 
     if (historicalCandles.length > 0) {
@@ -444,7 +445,7 @@ export function startAlertEngine({
     }
 
     const n = sortedCandles.length;
-    const timeframeMs = 15 * 60 * 1000;
+    const timeframeMs = (timeframeMinutes || 15) * 60 * 1000;
     const now = Date.now();
 
     const firstEmaCloseIndex = emaPeriod - 1;
@@ -629,7 +630,7 @@ export function startAlertEngine({
    * Evaluate VWAP crossover signals (alert only, no auto-trade).
    * Signal: closed green candle crosses above VWAP.
    */
-  const evaluateVWAP = (candles, instrumentKey) => {
+  const evaluateVWAP = (candles, instrumentKey, timeframeMinutes = 15) => {
     // Sort ascending
     const sorted = [...candles].reverse();
     if (sorted.length < 2) return [];
@@ -646,7 +647,7 @@ export function startAlertEngine({
     const vwapValues = calculateVWAP(todayCandles);
     if (vwapValues.length < 2) return [];
 
-    const timeframeMs = 15 * 60 * 1000;
+    const timeframeMs = (timeframeMinutes || 15) * 60 * 1000;
     const now = Date.now();
     const vwapSignals = [];
 
@@ -748,16 +749,15 @@ export function startAlertEngine({
         userMap.set(userId, Array.from(wl));
       }
       
-      const allKeys = Array.from(
-        new Set([].concat(...Array.from(userMap.values())))
-      );
+      const allPairs = dynamicSubscriptionManager.getAllKeyTimeframePairs();
 
       const now = Date.now();
-      const keysToProcess = allKeys.filter((k) => {
-        const retryAt = permanentlyFailedUntil.get(k);
+      const pairsToProcess = allPairs.filter(({ key, timeframe }) => {
+        const pairId = `${key}::${timeframe}`;
+        const retryAt = permanentlyFailedUntil.get(pairId);
         if (!retryAt) return true;
         if (now >= retryAt) {
-          permanentlyFailedUntil.delete(k);
+          permanentlyFailedUntil.delete(pairId);
           return true;
         }
         return false;
@@ -768,17 +768,17 @@ export function startAlertEngine({
       
       if (shouldLog) {
         console.log(
-          `[AlertEngine] Tick #${tickCount}: Monitoring ${keysToProcess.length}/${allKeys.length} instruments (${permanentlyFailedUntil.size} cooling down)`
+          `[AlertEngine] Tick #${tickCount}: Monitoring ${pairsToProcess.length}/${allPairs.length} instruments (${permanentlyFailedUntil.size} cooling down)`
         );
       }
 
-      if (keysToProcess.length === 0) {
+      if (pairsToProcess.length === 0) {
         if (shouldLog) {
-          if (allKeys.length > 0) {
+          if (allPairs.length > 0) {
             const now = Date.now();
             if (now - lastNoInstrumentsWarnAt > 10 * 60 * 1000) {
               console.warn(
-                `[AlertEngine] ⚠️  All ${allKeys.length} instruments failed to load. Check Upstox token validity.`
+                `[AlertEngine] ⚠️  All ${allPairs.length} instruments failed to load. Check Upstox token validity.`
               );
               console.warn('[AlertEngine] Upstox token may be expired. Please refresh at: http://pratik.gyanoda.in/login');
               lastNoInstrumentsWarnAt = now;
@@ -798,18 +798,21 @@ export function startAlertEngine({
       const successfulKeys = new Set();
       const failedKeys = new Map();
       const batchSize = 10;
+      const tickedAutoTradeKeys = new Set(); // prevent duplicate onCandleTick per instrument
 
-      for (let i = 0; i < keysToProcess.length; i += batchSize) {
-        const batch = keysToProcess.slice(i, i + batchSize);
+      for (let i = 0; i < pairsToProcess.length; i += batchSize) {
+        const batch = pairsToProcess.slice(i, i + batchSize);
 
         await Promise.all(
-          batch.map(async (origKey) => {
+          batch.map(async ({ key: origKey, timeframe: tf }) => {
+            const pairId = `${origKey}::${tf}`;
+            const intervalMinutes = tf === '5m' ? 5 : 15;
             try {
               let workingKey = workingKeyCache.get(origKey);
               let data = null;
 
               if (workingKey) {
-                const url = buildIntradayURL(workingKey);
+                const url = buildIntradayURL(workingKey, intervalMinutes);
                 const r = await fetch(url, { headers: getHeaders() });
 
                 if (r.ok) {
@@ -817,9 +820,9 @@ export function startAlertEngine({
                   data = j?.data?.candles || null;
 
                   if (data && data.length > 0) {
-                    failureCount.delete(origKey);
-                    permanentlyFailedUntil.delete(origKey);
-                    successfulKeys.add(origKey);
+                    failureCount.delete(pairId);
+                    permanentlyFailedUntil.delete(pairId);
+                    successfulKeys.add(pairId);
                   }
                 } else {
                   workingKeyCache.delete(origKey);
@@ -828,15 +831,15 @@ export function startAlertEngine({
 
               if (!data || data.length < 20) {
                 const variants = buildVariants(origKey);
-                const result = await tryIntraday(origKey, variants);
+                const result = await tryIntraday(origKey, variants, intervalMinutes);
 
                 if (result) {
                   workingKey = result.key;
                   data = result.data;
                   workingKeyCache.set(origKey, workingKey);
-                  failureCount.delete(origKey);
-                  permanentlyFailedUntil.delete(origKey);
-                  successfulKeys.add(origKey);
+                  failureCount.delete(pairId);
+                  permanentlyFailedUntil.delete(pairId);
+                  successfulKeys.add(pairId);
 
                   if (workingKey !== origKey) {
                     console.log(
@@ -844,17 +847,17 @@ export function startAlertEngine({
                     );
                   }
                 } else {
-                  const failures = (failureCount.get(origKey) || 0) + 1;
-                  failureCount.set(origKey, failures);
+                  const failures = (failureCount.get(pairId) || 0) + 1;
+                  failureCount.set(pairId, failures);
                   failedKeys.set(
-                    origKey,
+                    pairId,
                     `No data after ${variants.length} variants (attempt ${failures}/5)`
                   );
 
                   if (failures >= 5) {
-                    permanentlyFailedUntil.set(origKey, Date.now() + FAILED_RETRY_MS);
+                    permanentlyFailedUntil.set(pairId, Date.now() + FAILED_RETRY_MS);
                     console.log(
-                      `[AlertEngine] ⛔ Cooling down ${origKey} after ${failures} failures (retry in ${Math.round(FAILED_RETRY_MS / 1000)}s)`
+                      `[AlertEngine] ⛔ Cooling down ${origKey} (${tf}) after ${failures} failures (retry in ${Math.round(FAILED_RETRY_MS / 1000)}s)`
                     );
                   }
                 }
@@ -872,50 +875,54 @@ export function startAlertEngine({
                   data,
                   origKey,
                   workingKey,
-                  maxToCheck
+                  maxToCheck,
+                  intervalMinutes
                 );
                 
                 if (signals && signals.length > 0) {
-                  keyToSignal.set(origKey, signals);
+                  keyToSignal.set(pairId, signals);
                 }
 
                 // VWAP evaluation (alert-only, no auto-trade)
                 try {
-                  const vwapSigs = evaluateVWAP(data, origKey);
+                  const vwapSigs = evaluateVWAP(data, origKey, intervalMinutes);
                   if (vwapSigs && vwapSigs.length > 0) {
-                    keyToVwapSignal.set(origKey, vwapSigs);
+                    keyToVwapSignal.set(pairId, vwapSigs);
                   }
                 } catch (vwapErr) {
                   console.error(`[AlertEngine] VWAP error for ${origKey}:`, vwapErr.message);
                 }
 
-                // Auto-trade: monitor active trades on every candle tick
-                autoTradeService.onCandleTick(origKey, data).catch((err) =>
-                  console.error(`[AutoTrade] Tick error for ${origKey}:`, err.message)
-                );
+                // Auto-trade: monitor active trades on every candle tick (once per instrument)
+                if (!tickedAutoTradeKeys.has(origKey)) {
+                  tickedAutoTradeKeys.add(origKey);
+                  autoTradeService.onCandleTick(origKey, data).catch((err) =>
+                    console.error(`[AutoTrade] Tick error for ${origKey}:`, err.message)
+                  );
+                }
 
-                successfulKeys.add(origKey);
-              } else if (!failedKeys.has(origKey) && !successfulKeys.has(origKey)) {
-                failedKeys.set(origKey, `No candles returned`);
+                successfulKeys.add(pairId);
+              } else if (!failedKeys.has(pairId) && !successfulKeys.has(pairId)) {
+                failedKeys.set(pairId, `No candles returned`);
               }
             } catch (err) {
               console.error(
-                `[AlertEngine] Error processing ${origKey}:`,
+                `[AlertEngine] Error processing ${origKey} (${tf}):`,
                 err.message
               );
-              failedKeys.set(origKey, `Exception: ${err.message}`);
+              failedKeys.set(pairId, `Exception: ${err.message}`);
             }
           })
         );
 
-        if (i + batchSize < keysToProcess.length) {
+        if (i + batchSize < pairsToProcess.length) {
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
       }
 
       console.log(`\n[AlertEngine] Fetch Summary:`);
-      console.log(`  ✓ Success: ${successfulKeys.size}/${keysToProcess.length}`);
-      console.log(`  ✗ Failed: ${failedKeys.size}/${keysToProcess.length}`);
+      console.log(`  ✓ Success: ${successfulKeys.size}/${pairsToProcess.length}`);
+      console.log(`  ✗ Failed: ${failedKeys.size}/${pairsToProcess.length}`);
 
       // If ALL instruments failed, it's likely an Upstox auth issue
       if (successfulKeys.size === 0 && failedKeys.size > 0) {
@@ -946,7 +953,9 @@ export function startAlertEngine({
         
         // STEP 1: Send broadcasts and WhatsApp IMMEDIATELY
         if (typeof broadcastAlert === 'function') {
-          for (const [instrumentKey, signals] of keyToSignal) {
+          for (const [pairId, signals] of keyToSignal) {
+            const [instrumentKey, tf] = pairId.split('::');
+            const tfLabel = tf || '15m';
             let instrumentName = instrumentKey;
             let instrument = null;
             
@@ -961,13 +970,13 @@ export function startAlertEngine({
             
             for (const sig of signals) {
               for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
-                if (watchlistSet && watchlistSet.has(instrumentKey)) {
+                if (watchlistSet && watchlistSet.has(instrumentKey) && dynamicSubscriptionManager.getUserTimeframe(userId, instrumentKey) === tfLabel) {
                   try {
                     const notificationSentAt = Date.now();
                     const delayFromDetection = Math.round((notificationSentAt - sig.crossDetectedAt) / 1000);
                     const delayFromCandleClose = Math.round((notificationSentAt - sig.candleEndTime) / 1000);
                     console.log(
-                      `[AlertEngine] 📤 Broadcasting ${instrumentKey}\n` +
+                      `[AlertEngine] 📤 Broadcasting ${instrumentKey} (${tfLabel})\n` +
                       `   Delay from detection: ${delayFromDetection}s\n` +
                       `   Delay from candle close: ${delayFromCandleClose}s`
                     );
@@ -977,7 +986,7 @@ export function startAlertEngine({
                       userId,
                       instrumentKey,
                       instrumentName,
-                      timeframe: '15m',
+                      timeframe: tfLabel,
                       strategy: 'ema20_cross_up',
                       candle: { 
                         ts: sig.ts, 
@@ -1110,7 +1119,9 @@ export function startAlertEngine({
         const ops = [];
         for (const [userId, keys] of userMap) {
           for (const k of keys) {
-            const sigs = keyToSignal.get(k) || [];
+            const userTf = dynamicSubscriptionManager.getUserTimeframe(userId, k);
+            const pId = `${k}::${userTf}`;
+            const sigs = keyToSignal.get(pId) || [];
             if (!sigs.length) continue;
 
             const currentSet = dynamicSubscriptionManager.userWatchlists.get(userId);
@@ -1131,7 +1142,7 @@ export function startAlertEngine({
                     $setOnInsert: {
                       userId,
                       instrumentKey: k,
-                      timeframe: "15m",
+                      timeframe: userTf,
                       strategy: "ema20_cross_up",
                       candle: {
                         ts: sig.ts,
@@ -1181,7 +1192,9 @@ export function startAlertEngine({
 
         const whatsappNumbers = getWhatsAppPhoneNumbers();
 
-        for (const [instrumentKey, signals] of keyToVwapSignal) {
+        for (const [pairId, signals] of keyToVwapSignal) {
+          const [instrumentKey, tf] = pairId.split('::');
+          const tfLabel = tf || '15m';
           let instrumentName = instrumentKey;
           let instrument = null;
 
@@ -1197,14 +1210,14 @@ export function startAlertEngine({
           for (const sig of signals) {
             // Broadcast to all subscribed users
             for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
-              if (watchlistSet && watchlistSet.has(instrumentKey)) {
+              if (watchlistSet && watchlistSet.has(instrumentKey) && dynamicSubscriptionManager.getUserTimeframe(userId, instrumentKey) === tfLabel) {
                 try {
                   if (typeof broadcastAlert === 'function') {
                     broadcastAlert({
                       userId,
                       instrumentKey,
                       instrumentName,
-                      timeframe: '15m',
+                      timeframe: tfLabel,
                       strategy: 'vwap_cross_up',
                       candle: {
                         ts: sig.ts,
@@ -1273,7 +1286,9 @@ export function startAlertEngine({
         const vwapOps = [];
         for (const [userId, keys] of userMap) {
           for (const k of keys) {
-            const sigs = keyToVwapSignal.get(k) || [];
+            const userTf = dynamicSubscriptionManager.getUserTimeframe(userId, k);
+            const pId = `${k}::${userTf}`;
+            const sigs = keyToVwapSignal.get(pId) || [];
             if (!sigs.length) continue;
 
             const currentSet = dynamicSubscriptionManager.userWatchlists.get(userId);
@@ -1292,7 +1307,7 @@ export function startAlertEngine({
                     $setOnInsert: {
                       userId,
                       instrumentKey: k,
-                      timeframe: "15m",
+                      timeframe: userTf,
                       strategy: "vwap_cross_up",
                       candle: {
                         ts: sig.ts,

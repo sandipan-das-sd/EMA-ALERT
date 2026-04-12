@@ -282,10 +282,10 @@ export async function getBatchLtp(keys: string[]) {
   return (data?.data || {}) as Record<string, any>;
 }
 
-export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' | 'MTF' = 'I', direction: 'BUY' | 'SELL' = 'BUY', targetPoints = 0) {
+export async function addToWatchlist(instrumentKey: string, lots = 1, product: 'I' | 'D' | 'MTF' = 'I', direction: 'BUY' | 'SELL' = 'BUY', targetPoints = 0, timeframe: '5m' | '15m' = '15m') {
   const data = await request("/watchlist", {
     method: "POST",
-    body: { instrumentKey, lots, product, direction, targetPoints },
+    body: { instrumentKey, lots, product, direction, targetPoints, timeframe },
   });
   return (data?.watchlist || []) as string[];
 }
@@ -315,6 +315,13 @@ export async function updateWatchlistTargetPoints(instrumentKey: string, targetP
   return request(`/watchlist/${encodeURIComponent(instrumentKey)}/target-points`, {
     method: "PATCH",
     body: { targetPoints },
+  });
+}
+
+export async function updateWatchlistTimeframe(instrumentKey: string, timeframe: '5m' | '15m') {
+  return request(`/watchlist/${encodeURIComponent(instrumentKey)}/timeframe`, {
+    method: "PATCH",
+    body: { timeframe },
   });
 }
 

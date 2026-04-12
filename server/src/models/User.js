@@ -83,6 +83,12 @@ const userSchema = new mongoose.Schema(
       of: Number,
       default: {},
     },
+    // Per-instrument candle timeframe: '5m' or '15m' (default '15m')
+    watchlistTimeframe: {
+      type: Map,
+      of: String,
+      default: {},
+    },
     // Auto-trade configuration
     autoTrade: {
       enabled: { type: Boolean, default: false },

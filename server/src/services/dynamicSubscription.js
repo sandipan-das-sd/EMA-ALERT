@@ -4,6 +4,7 @@ class DynamicSubscriptionManager {
   constructor() {
     this.subscribedKeys = new Set();
     this.userWatchlists = new Map(); // userId -> Set of instrument keys
+    this.userTimeframes = new Map(); // userId -> Map<instrumentKey, '5m'|'15m'>
     this.subscriptionCallbacks = []; // Functions to call when subscription changes
   }
 
@@ -42,6 +43,13 @@ class DynamicSubscriptionManager {
 
         this.userWatchlists.set(userId, newWatchlist);
 
+        // Track per-instrument timeframe
+        const tfMap = new Map();
+        for (const key of newWatchlist) {
+          tfMap.set(key, user.watchlistTimeframe?.get(key) || '15m');
+        }
+        this.userTimeframes.set(userId, tfMap);
+
         // Check if subscription needs to change
         const hasNewKeys =
           !oldWatchlist ||
@@ -62,13 +70,20 @@ class DynamicSubscriptionManager {
   // Load all user watchlists
   async initializeAllWatchlists() {
     try {
-      const users = await User.find({}, { _id: 1, watchlist: 1 });
+      const users = await User.find({}, { _id: 1, watchlist: 1, watchlistTimeframe: 1 });
       let totalWatchlistItems = 0;
 
       for (const user of users) {
         if (user.watchlist && user.watchlist.length > 0) {
-          this.userWatchlists.set(user._id.toString(), new Set(user.watchlist));
+          const userId = user._id.toString();
+          this.userWatchlists.set(userId, new Set(user.watchlist));
           totalWatchlistItems += user.watchlist.length;
+
+          const tfMap = new Map();
+          for (const key of user.watchlist) {
+            tfMap.set(key, user.watchlistTimeframe?.get(key) || '15m');
+          }
+          this.userTimeframes.set(userId, tfMap);
         }
       }
 
@@ -85,8 +100,35 @@ class DynamicSubscriptionManager {
   removeUser(userId) {
     if (this.userWatchlists.has(userId)) {
       this.userWatchlists.delete(userId);
+      this.userTimeframes.delete(userId);
       this._notifyChange();
     }
+  }
+
+  // Get timeframe for a specific user + instrument (default '15m')
+  getUserTimeframe(userId, instrumentKey) {
+    return this.userTimeframes.get(userId)?.get(instrumentKey) || '15m';
+  }
+
+  // Get all unique (instrumentKey, timeframe) pairs across all users
+  getAllKeyTimeframePairs() {
+    const pairs = new Map(); // "key::tf" -> { key, timeframe }
+    for (const [userId, tfMap] of this.userTimeframes) {
+      for (const [key, tf] of tfMap) {
+        const pairKey = `${key}::${tf}`;
+        if (!pairs.has(pairKey)) {
+          pairs.set(pairKey, { key, timeframe: tf });
+        }
+      }
+    }
+    // Also add base subscribed keys with default 15m
+    for (const key of this.subscribedKeys) {
+      const pairKey = `${key}::15m`;
+      if (!pairs.has(pairKey)) {
+        pairs.set(pairKey, { key, timeframe: '15m' });
+      }
+    }
+    return Array.from(pairs.values());
   }
 
   _notifyChange() {

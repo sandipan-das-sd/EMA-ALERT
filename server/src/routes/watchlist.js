@@ -84,6 +84,7 @@ router.get("/", async (req, res) => {
       const product = user.watchlistProduct?.get(key) ?? 'I';
       const direction = user.watchlistDirection?.get(key) ?? 'BUY';
       const targetPoints = user.watchlistTargetPoints?.get(key) ?? 0;
+      const timeframe = user.watchlistTimeframe?.get(key) ?? '15m';
 
       return {
         key,
@@ -98,6 +99,7 @@ router.get("/", async (req, res) => {
         lots,
         lotSize,
         product,
+        timeframe,
         direction,
         targetPoints,
       };
@@ -117,7 +119,7 @@ router.get("/", async (req, res) => {
 // POST add instrument
 router.post("/", async (req, res) => {
   try {
-    const { instrumentKey, lots, product, direction } = req.body;
+    const { instrumentKey, lots, product, direction, timeframe } = req.body;
     if (!instrumentKey)
       return res.status(400).json({ message: "instrumentKey required" });
     if (allowedSet.size && !allowedSet.has(instrumentKey)) {
@@ -148,6 +150,11 @@ router.post("/", async (req, res) => {
     user.watchlistTargetPoints = user.watchlistTargetPoints ?? new Map();
     user.watchlistTargetPoints.set(instrumentKey, safeTargetPoints);
     user.markModified('watchlistTargetPoints');
+    // Store timeframe: '5m' or '15m' (default '15m')
+    const safeTimeframe = timeframe === '5m' ? '5m' : '15m';
+    user.watchlistTimeframe = user.watchlistTimeframe ?? new Map();
+    user.watchlistTimeframe.set(instrumentKey, safeTimeframe);
+    user.markModified('watchlistTimeframe');
     await user.save();
     // Trigger dynamic subscription update
     await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
@@ -179,6 +186,10 @@ router.delete("/:instrumentKey", async (req, res) => {
     if (user.watchlistTargetPoints) {
       user.watchlistTargetPoints.delete(instrumentKey);
       user.markModified('watchlistTargetPoints');
+    }
+    if (user.watchlistTimeframe) {
+      user.watchlistTimeframe.delete(instrumentKey);
+      user.markModified('watchlistTimeframe');
     }
     await user.save();
     // Trigger dynamic subscription update
@@ -247,6 +258,28 @@ router.patch("/:instrumentKey/direction", async (req, res) => {
     user.markModified('watchlistDirection');
     await user.save();
     res.json({ instrumentKey, direction });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH update timeframe for an existing watchlist item ('5m' or '15m')
+router.patch("/:instrumentKey/timeframe", async (req, res) => {
+  try {
+    const { instrumentKey } = req.params;
+    const timeframe = req.body.timeframe === '5m' ? '5m' : '15m';
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.watchlist.includes(instrumentKey)) {
+      return res.status(404).json({ message: "Instrument not in watchlist" });
+    }
+    user.watchlistTimeframe = user.watchlistTimeframe ?? new Map();
+    user.watchlistTimeframe.set(instrumentKey, timeframe);
+    user.markModified('watchlistTimeframe');
+    await user.save();
+    // Trigger dynamic subscription update (timeframe change affects candle fetch)
+    await dynamicSubscriptionManager.updateUserWatchlist(req.user.id);
+    res.json({ instrumentKey, timeframe });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }
