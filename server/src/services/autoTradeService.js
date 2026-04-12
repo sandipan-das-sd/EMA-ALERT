@@ -242,15 +242,9 @@ async function onSignal(userId, instrumentKey, sig) {
       ? (transactionType === 'BUY' ? entryPrice + fixedPts    : entryPrice - fixedPts)
       : (transactionType === 'BUY' ? entryPrice + slDistance  : entryPrice - slDistance);
 
-    const buffer         = parseFloat((entryPrice * 0.002).toFixed(2));
-    const limitPriceForSL = transactionType === 'BUY'
-      ? parseFloat((entryPrice + buffer).toFixed(2))
-      : parseFloat((entryPrice - buffer).toFixed(2));
-
     console.log(
-      `[AutoTrade] 🚀 Placing SL-BREAKOUT ${transactionType} order for ${instrumentKey}\n` +
+      `[AutoTrade] 🚀 Placing SL-M (market) ${transactionType} order for ${instrumentKey}\n` +
       `   trigger     : ${entryPrice}  (candle ${transactionType === 'BUY' ? 'HIGH' : 'LOW'})\n` +
-      `   limit       : ${limitPriceForSL}  (trigger + 0.2% buffer)\n` +
       `   initialSL   : ${initialSL}\n` +
       `   target1     : ${target1}\n` +
       `   quantity    : ${quantity}  (${lots} lots × ${lotSize} lotSize)\n` +
@@ -262,9 +256,9 @@ async function onSignal(userId, instrumentKey, sig) {
       quantity,
       product,
       validity: 'DAY',
-      price: limitPriceForSL,
+      price: 0,
       instrument_token: instrumentKey,
-      order_type: 'SL',
+      order_type: 'SL-M',
       transaction_type: transactionType,
       disclosed_quantity: 0,
       trigger_price: entryPrice,
@@ -301,7 +295,7 @@ async function onSignal(userId, instrumentKey, sig) {
       `   instrument  : ${instrumentKey}\n` +
       `   orderId     : ${orderId}\n` +
       `   trigger     : ${entryPrice}\n` +
-      `   limit       : ${limitPriceForSL}\n` +
+      `   type        : SL-M (market fill on trigger)\n` +
       `   SL          : ${initialSL}\n` +
       `   T1          : ${target1}\n` +
       `   qty         : ${quantity}\n` +
