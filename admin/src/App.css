@@ -359,3 +359,107 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* ───── Logs Panel ───── */
+
+.logs-panel .section-title {
+  margin: 16px 0 8px;
+  color: #e8efff;
+  font-size: 16px;
+}
+
+.logs-panel .section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 8px;
+  flex-wrap: wrap;
+}
+
+.user-picker {
+  min-width: 340px;
+  font-size: 14px;
+}
+
+.log-kv-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 6px 12px;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+.kv-key {
+  color: #9ab0d2;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.tag-admin { color: #f59e0b; font-weight: 700; }
+.tag-active { color: #34d399; font-weight: 700; }
+.tag-inactive { color: #fb7185; font-weight: 700; }
+.tag-pending { color: #f59e0b; font-weight: 700; }
+.tag-dismissed { color: #8ba7cf; }
+.tag-buy { color: #34d399; font-weight: 700; }
+.tag-sell { color: #fb7185; font-weight: 700; }
+
+.mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; }
+
+.delay-ok { color: #34d399; }
+.delay-warn { color: #f59e0b; }
+.delay-bad { color: #fb7185; font-weight: 700; }
+
+/* Live Log Console */
+.live-logs-section {
+  margin-top: 16px;
+}
+
+.log-filter {
+  min-width: 220px;
+  font-size: 13px;
+}
+
+.live-log-container {
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px 0;
+}
+
+.log-line {
+  display: flex;
+  gap: 8px;
+  padding: 2px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line:hover {
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.log-ts {
+  color: #6b7f9e;
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
+.log-level {
+  flex-shrink: 0;
+  min-width: 52px;
+  font-weight: 700;
+}
+
+.log-msg {
+  color: #c8d6e8;
+}
+
+.log-warn .log-msg { color: #f59e0b; }
+.log-error .log-msg { color: #fb7185; }

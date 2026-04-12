@@ -1,6 +1,7 @@
 import express from 'express';
 import User from '../models/User.js';
 import Alert from '../models/Alert.js';
+import ActiveTradeState from '../models/ActiveTradeState.js';
 import { protect } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/admin.js';
 import { marketState } from '../services/marketState.js';
@@ -491,6 +492,96 @@ router.get('/export/alerts.csv', async (req, res) => {
     return res.send(csv);
   } catch (e) {
     return res.status(500).json({ message: 'Failed to export alerts CSV', error: e.message });
+  }
+});
+
+// ---------- Detailed user logs for admin panel ----------
+
+router.get('/users/:id/detailed-logs', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('name email phone role isActive watchlist watchlistLots watchlistProduct watchlistDirection watchlistTargetPoints autoTrade pushToken lastLoginAt createdAt')
+      .lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const userId = String(user._id);
+
+    // Get alerts (last 500)
+    const alerts = await Alert.find({ userId: user._id })
+      .sort({ createdAt: -1 })
+      .limit(500)
+      .lean();
+
+    // Get active trades
+    const activeTrades = await ActiveTradeState.find({ userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Enrich watchlist with per-instrument config + live prices
+    const watchlistDetails = (user.watchlist || []).map((key) => {
+      const lots = user.watchlistLots?.get?.(key) ?? user.watchlistLots?.[key] ?? 1;
+      const product = user.watchlistProduct?.get?.(key) ?? user.watchlistProduct?.[key] ?? 'I';
+      const direction = user.watchlistDirection?.get?.(key) ?? user.watchlistDirection?.[key] ?? 'BUY';
+      const targetPoints = user.watchlistTargetPoints?.get?.(key) ?? user.watchlistTargetPoints?.[key] ?? 0;
+      const ltp = marketState.latestQuotes[key]?.ltp ?? marketState.lastTicks[key]?.ltp ?? null;
+      const changePct = marketState.latestQuotes[key]?.changePct ?? null;
+      return { key, lots, product, direction, targetPoints, ltp, changePct };
+    });
+
+    // Build alert timeline with full details
+    const alertTimeline = alerts.map((a) => ({
+      id: a._id,
+      instrumentKey: a.instrumentKey,
+      tradingSymbol: a.tradingSymbol || '',
+      segment: a.segment || '',
+      timeframe: a.timeframe,
+      strategy: a.strategy,
+      status: a.status,
+      candle: a.candle || {},
+      ema: a.ema,
+      crossDetectedAt: a.crossDetectedAt,
+      notificationSentAt: a.notificationSentAt,
+      createdAt: a.createdAt,
+    }));
+
+    // Active trade details
+    const tradeDetails = activeTrades.map((t) => ({
+      tradeKey: t.tradeKey,
+      instrumentKey: t.instrumentKey,
+      orderId: t.orderId,
+      status: t.status,
+      transactionType: t.transactionType,
+      entryPrice: t.entryPrice,
+      initialSL: t.initialSL,
+      currentTrailSL: t.currentTrailSL,
+      target1: t.target1,
+      quantity: t.quantity,
+      product: t.product,
+      signalTs: t.signalTs,
+      lastCandleTs: t.lastCandleTs,
+      createdAt: t.createdAt,
+    }));
+
+    res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || '',
+        role: user.role,
+        isActive: user.isActive,
+        pushToken: user.pushToken || '',
+        lastLoginAt: user.lastLoginAt,
+        createdAt: user.createdAt,
+        autoTrade: user.autoTrade || { enabled: false },
+      },
+      watchlist: watchlistDetails,
+      alerts: alertTimeline,
+      activeTrades: tradeDetails,
+      ts: Date.now(),
+    });
+  } catch (e) {
+    res.status(500).json({ message: 'Failed to load detailed logs', error: e.message });
   }
 });
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { API_BASE } from './lib/runtime-config';
 import { useWsContext } from './contexts/ws-context.jsx';
+import LogsPanel from './components/LogsPanel.jsx';
 
 async function api(path, options = {}) {
   let response;
@@ -415,7 +416,7 @@ function App() {
       </section>
 
       <nav className="tabs">
-        {['users', 'alerts', 'market'].map((t) => (
+        {['users', 'alerts', 'logs', 'market'].map((t) => (
           <button key={t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>
             {t.toUpperCase()}
           </button>
@@ -608,6 +609,8 @@ function App() {
           <div className="panel-foot">Total alerts loaded: {alerts.length}</div>
         </section>
       )}
+
+      {tab === 'logs' && <LogsPanel />}
 
       {tab === 'market' && (
         <section className="panel">

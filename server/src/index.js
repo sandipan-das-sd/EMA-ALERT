@@ -179,6 +179,27 @@ async function start() {
     // WS server to stream price ticks to frontend clients
   const wss = new WebSocketServer({ server, path: '/ws/ticker' });
   wss.clients.forEach = wss.clients.forEach.bind(wss.clients); // defensive in some node/ws combos
+
+    // ---------- Live log broadcasting for admin panel ----------
+    const LOG_TAGS = ['[AlertEngine]', '[AutoTrade]', '[Margin]', '[WhatsApp]', '[Voice]', '[Push]', '[Email]', '[WebSocket]', '[Poller]', '[Feed]'];
+    const _origLog = console.log.bind(console);
+    const _origWarn = console.warn.bind(console);
+    const _origError = console.error.bind(console);
+
+    function broadcastLog(level, args) {
+      const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      const isRelevant = LOG_TAGS.some(tag => line.includes(tag));
+      if (!isRelevant) return;
+      const payload = JSON.stringify({ type: 'server-log', level, message: line, ts: Date.now() });
+      try {
+        wss.clients.forEach(c => { if (c.readyState === 1 && c._adminLogs) c.send(payload); });
+      } catch {}
+    }
+
+    console.log = (...args) => { _origLog(...args); broadcastLog('info', args); };
+    console.warn = (...args) => { _origWarn(...args); broadcastLog('warn', args); };
+    console.error = (...args) => { _origError(...args); broadcastLog('error', args); };
+
     const apiBase = process.env.UPSTOX_SANDBOX === 'true'
       ? 'https://api-sandbox.upstox.com/v3'
       : (process.env.UPSTOX_API_BASE || 'https://api.upstox.com/v3');
@@ -863,6 +884,14 @@ feed.on('error', (err) => {
             User.findById(msg.userId).select('+upstoxAccessToken').then((user) => {
               if (user?.upstoxAccessToken) openPortfolioStream(msg.userId, user.upstoxAccessToken);
             }).catch(() => {});
+          }
+          // Admin live-log subscription
+          if (msg.type === 'subscribe-logs') {
+            socket._adminLogs = true;
+            socket.send(JSON.stringify({ type: 'server-log', level: 'info', message: '[LiveLog] Subscribed to live server logs', ts: Date.now() }));
+          }
+          if (msg.type === 'unsubscribe-logs') {
+            socket._adminLogs = false;
           }
         } catch {}
       });
