@@ -82,6 +82,29 @@ export function startAlertEngine({
     const v = parseInt(process.env.ALERT_SENT_TTL_MS, 10);
     return Number.isFinite(v) && v > 0 ? v : 72 * 60 * 60 * 1000;
   })();
+
+  const preloadSentAlerts = async () => {
+  try {
+    const cutoff = Date.now() - SENT_ALERT_TTL_MS;
+    const recentAlerts = await Alert.find({
+      createdAt: { $gte: new Date(cutoff) }
+    }).select('instrumentKey candle').lean();
+
+    let count = 0;
+    for (const a of recentAlerts) {
+      if (!a?.candle?.ts) continue;
+      const alertId = `${a.instrumentKey}::${a.candle.ts}`;
+      sentAlerts.set(alertId, Date.now());
+      count++;
+    }
+    if (count > 0) {
+      console.log(`[AlertEngine] ✅ Pre-loaded ${count} sent alerts from DB (prevents restart re-fires)`);
+    }
+  } catch (err) {
+    console.error('[AlertEngine] Failed to preload sentAlerts from DB:', err.message);
+  }
+};
+
   const MAX_SENT_ALERTS = (() => {
     const v = parseInt(process.env.ALERT_SENT_MAX, 10);
     return Number.isFinite(v) && v > 0 ? v : 50_000;
@@ -1007,7 +1030,7 @@ export function startAlertEngine({
   }
 
   console.log("[AlertEngine] Starting first tick...");
-  tick();
+  preloadSentAlerts().then(() => tick());
 
   return {
     stop: () => {

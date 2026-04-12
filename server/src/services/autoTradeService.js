@@ -144,64 +144,119 @@ async function getOrderDetails(accessToken, orderId) {
 async function onSignal(userId, instrumentKey, sig) {
   const tradeKey = `${userId}:${instrumentKey}`;
 
-  // Only one active trade per user × instrument
+  // ── GUARD 1: In-memory check (fast path) ──────────────────────────────────
   if (activeTrades.has(tradeKey)) {
-    console.log(`[AutoTrade] Already in trade for ${instrumentKey} (user ${userId}), skipping`);
+    console.log(
+      `[AutoTrade] ⏭️  SKIP (memory): Already in trade for ${instrumentKey} (user ${userId})`
+    );
     return;
   }
 
+  // ── GUARD 2: DB check — catches post-restart duplicates ───────────────────
+  // Scenario: server restarted → activeTrades is empty → but Upstox still has
+  // a live SL order sitting from before restart. Without this check, a new SL
+  // order would be placed → TWO orders on exchange for same instrument!
   try {
-    const User = (await import('../models/User.js')).default;
-    const user = await User.findById(userId).select('+upstoxAccessToken autoTrade watchlistLots watchlistProduct watchlistDirection watchlistTargetPoints');
+    const ActiveTradeState = (await import('../models/ActiveTradeState.js')).default;
+    const existingInDb = await ActiveTradeState.findOne({ tradeKey }).lean();
 
-    if (!user?.autoTrade?.enabled) return;
-    if (!user.upstoxAccessToken) {
-      console.warn(`[AutoTrade] No Upstox token for user ${userId}, cannot auto-trade ${instrumentKey}`);
+    if (existingInDb) {
+      console.log(
+        `[AutoTrade] ⏭️  SKIP (DB): Trade already exists in DB for ${instrumentKey}\n` +
+        `   tradeKey   : ${tradeKey}\n` +
+        `   status     : ${existingInDb.status}\n` +
+        `   orderId    : ${existingInDb.orderId}\n` +
+        `   entryPrice : ${existingInDb.entryPrice}\n` +
+        `   createdAt  : ${new Date(existingInDb.createdAt).toISOString()}\n` +
+        `   ℹ️  Reloading into memory so tick manager can continue monitoring it...`
+      );
+      // Reload from DB into memory so onCandleTick() can manage it normally
+      await loadFromDb();
       return;
     }
 
-    // Compute quantity from per-instrument lots preference × exchange lot size
+    console.log(
+      `[AutoTrade] ✅ DB check passed — no existing trade for ${instrumentKey}, proceeding to place order`
+    );
+  } catch (err) {
+    // DB check failed — log clearly but DO NOT block trade placement
+    // Better to risk a duplicate than to silently miss a valid signal
+    console.error(
+      `[AutoTrade] ⚠️  DB pre-check FAILED for ${instrumentKey} (user ${userId})\n` +
+      `   Error: ${err.message}\n` +
+      `   ⚠️  Proceeding anyway — verify manually if duplicate orders appear`
+    );
+  }
+
+  // ── MAIN LOGIC ─────────────────────────────────────────────────────────────
+  try {
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findById(userId).select(
+      '+upstoxAccessToken autoTrade watchlistLots watchlistProduct watchlistDirection watchlistTargetPoints'
+    );
+
+    if (!user?.autoTrade?.enabled) {
+      console.log(`[AutoTrade] ⏭️  SKIP: autoTrade not enabled for user ${userId}`);
+      return;
+    }
+    if (!user.upstoxAccessToken) {
+      console.warn(
+        `[AutoTrade] ⚠️  No Upstox token for user ${userId}, cannot auto-trade ${instrumentKey}`
+      );
+      return;
+    }
+
+    // Quantity
     const lots = user.watchlistLots?.get(instrumentKey) ?? 1;
     const { instrumentsSearchService } = await import('./instrumentsSearch.js');
     const instrument = instrumentsSearchService.getInstrument(instrumentKey);
     const lotSize = instrument?.lotSize ?? 1;
     const quantity = Math.max(1, lots * lotSize);
-    // Per-instrument product overrides global setting
+
     const product = user.watchlistProduct?.get(instrumentKey) ?? user.autoTrade.product ?? 'I';
-    // Per-instrument direction: BUY (long) or SELL (short — intraday only)
     const direction = (user.watchlistDirection?.get(instrumentKey) ?? 'BUY').toUpperCase();
     const transactionType = direction === 'SELL' ? 'SELL' : 'BUY';
 
     let entryPrice, initialSL, slDistance;
     if (transactionType === 'BUY') {
-      // Long: SL-BREAKOUT at crossover candle's HIGH — fills when next candle breaks it
       entryPrice = sig.high;
-      initialSL = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
+      initialSL  = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
       slDistance = entryPrice - initialSL;
     } else {
-      // Short: SL-BREAKOUT at crossover candle's LOW — fills when next candle breaks it
       entryPrice = sig.low;
-      initialSL = sig.prevCandleHigh != null ? sig.prevCandleHigh : sig.high;
+      initialSL  = sig.prevCandleHigh != null ? sig.prevCandleHigh : sig.high;
       slDistance = initialSL - entryPrice;
     }
 
     if (slDistance <= 0) {
-      console.warn(`[AutoTrade] Invalid SL for ${instrumentKey}: entry=${entryPrice}, SL=${initialSL}, direction=${transactionType}`);
+      console.warn(
+        `[AutoTrade] ⚠️  Invalid SL for ${instrumentKey}\n` +
+        `   entry=${entryPrice} | SL=${initialSL} | direction=${transactionType}\n` +
+        `   slDistance=${slDistance} — order NOT placed`
+      );
       return;
     }
 
-    // Use fixed target points if configured, otherwise 1:1 R/R
     const fixedPts = user.watchlistTargetPoints?.get(instrumentKey) ?? 0;
-    const target1 = fixedPts > 0
-      ? (transactionType === 'BUY' ? entryPrice + fixedPts : entryPrice - fixedPts)
-      : (transactionType === 'BUY' ? entryPrice + slDistance : entryPrice - slDistance);
+    const target1  = fixedPts > 0
+      ? (transactionType === 'BUY' ? entryPrice + fixedPts    : entryPrice - fixedPts)
+      : (transactionType === 'BUY' ? entryPrice + slDistance  : entryPrice - slDistance);
 
-    // SL order: only activates when LTP reaches the trigger price (breakout entry)
-    // BUY: fires only when price rises to sig.high; SELL: fires when price drops to sig.low
-    const buffer = parseFloat((entryPrice * 0.002).toFixed(2)); // 0.2% buffer ensures fill
+    const buffer         = parseFloat((entryPrice * 0.002).toFixed(2));
     const limitPriceForSL = transactionType === 'BUY'
       ? parseFloat((entryPrice + buffer).toFixed(2))
       : parseFloat((entryPrice - buffer).toFixed(2));
+
+    console.log(
+      `[AutoTrade] 🚀 Placing SL-BREAKOUT ${transactionType} order for ${instrumentKey}\n` +
+      `   trigger     : ${entryPrice}  (candle ${transactionType === 'BUY' ? 'HIGH' : 'LOW'})\n` +
+      `   limit       : ${limitPriceForSL}  (trigger + 0.2% buffer)\n` +
+      `   initialSL   : ${initialSL}\n` +
+      `   target1     : ${target1}\n` +
+      `   quantity    : ${quantity}  (${lots} lots × ${lotSize} lotSize)\n` +
+      `   product     : ${product}\n` +
+      `   direction   : ${transactionType}`
+    );
 
     const orderData = await placeOrder(user.upstoxAccessToken, {
       quantity,
@@ -237,16 +292,27 @@ async function onSignal(userId, instrumentKey, sig) {
       lastCandleTs: 0,
       createdAt: Date.now(),
     };
+
     activeTrades.set(tradeKey, newTrade);
     await saveTrade(tradeKey, newTrade);
 
     console.log(
-      `[AutoTrade] 📈 SL-BREAKOUT ${transactionType} placed` +
-      ` | ${instrumentKey} | qty=${quantity} | trigger=${entryPrice} | limit=${limitPriceForSL}` +
-      ` | SL=${initialSL} | T1=${target1} | orderId=${orderId}`
+      `[AutoTrade] ✅ SL-BREAKOUT placed & saved to DB\n` +
+      `   instrument  : ${instrumentKey}\n` +
+      `   orderId     : ${orderId}\n` +
+      `   trigger     : ${entryPrice}\n` +
+      `   limit       : ${limitPriceForSL}\n` +
+      `   SL          : ${initialSL}\n` +
+      `   T1          : ${target1}\n` +
+      `   qty         : ${quantity}\n` +
+      `   status      : pending_entry  (waiting for price to hit ${entryPrice})`
     );
+
   } catch (err) {
-    console.error(`[AutoTrade] Failed to place order for ${instrumentKey}:`, err.message);
+    console.error(
+      `[AutoTrade] ❌ Failed to place order for ${instrumentKey}\n` +
+      `   Error: ${err.message}`
+    );
   }
 }
 
