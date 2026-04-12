@@ -492,6 +492,7 @@ async function cancelAllPendingEntries() {
       console.error(`[AutoTrade] Cancel failed for ${trade.instrumentKey}:`, err.message);
     }
     activeTrades.delete(tradeKey);
+     await deleteTrade(tradeKey); //  — clears DB too
   }
 }
 
