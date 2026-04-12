@@ -516,6 +516,9 @@ export function startAlertEngine({
         }
       }
 
+      // SIGNAL: candle crosses EMA, is green, closes above EMA
+      // Alert fires IMMEDIATELY when this candle closes
+      // Auto-trade places SL-BREAKOUT at HIGH — fills only when price breaks out
       if (candleClosed && isGreen && emaIntersectsCandle && closedAboveEma) {
         const alertId = `${instrumentKey}::${candleStartTs}`;
         const alreadySentAt = sentAlerts.get(alertId);
@@ -524,7 +527,7 @@ export function startAlertEngine({
         }
         
         sentAlerts.set(alertId, Date.now());
-        const crossDetectedAt = Date.now(); // Track when we detected the cross
+        const crossDetectedAt = Date.now();
         const candleEndTime = candleEndTs;
         const delayFromCandleClose = Math.round((crossDetectedAt - candleEndTime) / 1000);
         console.log(
@@ -548,8 +551,8 @@ export function startAlertEngine({
           ema: emaOpenEffective,
           prevCandleLow,
           prevCandleHigh,
-          crossDetectedAt, // Add detection timestamp
-          candleEndTime, // Add candle close time for delay tracking
+          crossDetectedAt,
+          candleEndTime,
         });
       }
     }

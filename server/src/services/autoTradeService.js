@@ -174,12 +174,12 @@ async function onSignal(userId, instrumentKey, sig) {
 
     let entryPrice, initialSL, slDistance;
     if (transactionType === 'BUY') {
-      // Long: enter above candle high, SL below prev candle low
+      // Long: SL-BREAKOUT at crossover candle's HIGH — fills when next candle breaks it
       entryPrice = sig.high;
       initialSL = sig.prevCandleLow != null ? sig.prevCandleLow : sig.low;
       slDistance = entryPrice - initialSL;
     } else {
-      // Short: enter below candle low, SL above prev candle high
+      // Short: SL-BREAKOUT at crossover candle's LOW — fills when next candle breaks it
       entryPrice = sig.low;
       initialSL = sig.prevCandleHigh != null ? sig.prevCandleHigh : sig.high;
       slDistance = initialSL - entryPrice;
