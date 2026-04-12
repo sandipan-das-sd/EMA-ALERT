@@ -487,14 +487,6 @@ export function startAlertEngine({
         emaOpenEffective >= (low - tolIntersect) && 
         emaOpenEffective <= (high + tolIntersect);
 
-      // Check if previous candle closed below EMA (true crossover from below —
-      // catches gap-up cases where EMA is below candle low but price just crossed over)
-      const prevCandleCloseVal = idx > 0 ? Number(sortedCandles[idx - 1][4]) : null;
-      const prevClosedBelowEma = prevCandleCloseVal !== null && emaPrev !== null && prevCandleCloseVal < emaPrev;
-
-      // Signal if EMA intersects candle OR previous close was below EMA (gap-up crossover)
-      const crossoverDetected = emaIntersectsCandle || prevClosedBelowEma;
-
       // Check if closed above EMA
       const closedAboveEma = emaCurr !== null 
         ? (close > emaCurr) 
@@ -513,19 +505,18 @@ export function startAlertEngine({
       // Diagnostic logging for closed green candles
       if (candleClosed && isGreen && process.env.DEBUG_ALERTS) {
         const reasons = [];
-        if (!crossoverDetected) reasons.push("no_crossover(ema_not_in_range_and_prev_not_below_ema)");
+        if (!emaIntersectsCandle) reasons.push("ema_not_in_candle_range");
         if (!closedAboveEma) reasons.push("close_not_above_ema");
         if (reasons.length) {
           console.log(
             `[AlertEngine] ${instrumentKey} ${startIstStr} - no signal: ${reasons.join(", ")} | ` +
             `open=${open.toFixed(2)} ema=${emaOpenEffective.toFixed(5)} close=${close.toFixed(2)} ` +
-            `high=${high.toFixed(2)} low=${low.toFixed(2)} tol=${tolIntersect.toFixed(6)} ` +
-            `prevClose=${prevCandleCloseVal?.toFixed(2)} prevClosedBelowEma=${prevClosedBelowEma}`
+            `high=${high.toFixed(2)} low=${low.toFixed(2)} tol=${tolIntersect.toFixed(6)}`
           );
         }
       }
 
-      if (candleClosed && isGreen && crossoverDetected && closedAboveEma) {
+      if (candleClosed && isGreen && emaIntersectsCandle && closedAboveEma) {
         const alertId = `${instrumentKey}::${candleStartTs}`;
         const alreadySentAt = sentAlerts.get(alertId);
         if (alreadySentAt && Date.now() - alreadySentAt < SENT_ALERT_TTL_MS) {
