@@ -627,7 +627,7 @@ export function startAlertEngine({
   };
 
   /**
-   * Evaluate VWAP crossover signals (alert only, no auto-trade).
+   * Evaluate VWAP crossover signals (alert + auto-trade).
    * Signal: closed green candle crosses above VWAP.
    */
   const evaluateVWAP = (candles, instrumentKey, timeframeMinutes = 15) => {
@@ -716,6 +716,9 @@ export function startAlertEngine({
           `   Prev close: ${prevClose.toFixed(2)} (below VWAP ${prevVwap.toFixed(2)})`
         );
 
+        const prevCandleLow = idx > 0 ? Number(sortedCandles[idx - 1][3]) : low;
+        const prevCandleHigh = idx > 0 ? Number(sortedCandles[idx - 1][2]) : high;
+
         vwapSignals.push({
           ts: candleStartTs,
           open,
@@ -726,6 +729,8 @@ export function startAlertEngine({
           entry: high,                          // Buy above candle HIGH
           stoploss: low,                        // SL at candle LOW
           target: high + (high - low),          // 1:1 R/R
+          prevCandleLow,
+          prevCandleHigh,
           candleEndTime: candleEndTs,
           crossDetectedAt: Date.now(),
         });
@@ -883,7 +888,7 @@ export function startAlertEngine({
                   keyToSignal.set(pairId, signals);
                 }
 
-                // VWAP evaluation (alert-only, no auto-trade)
+                // VWAP evaluation (alert + auto-trade)
                 try {
                   const vwapSigs = evaluateVWAP(data, origKey, intervalMinutes);
                   if (vwapSigs && vwapSigs.length > 0) {
@@ -1186,7 +1191,7 @@ export function startAlertEngine({
         }
       }
 
-      // ── VWAP Alerts (notification-only, no auto-trade) ──
+      // ── VWAP Alerts (notification + auto-trade) ──
       if (keyToVwapSignal.size > 0) {
         console.log(`\n[AlertEngine] Processing ${keyToVwapSignal.size} VWAP alert(s)...`);
 
@@ -1235,6 +1240,11 @@ export function startAlertEngine({
                       createdAt: new Date().toISOString(),
                     });
                   }
+
+                  // Auto-trade: place entry order for VWAP signal (non-blocking)
+                  autoTradeService.onSignal(userId, instrumentKey, sig).catch((err) =>
+                    console.error(`[AutoTrade] VWAP signal error for ${instrumentKey}:`, err.message)
+                  );
 
                   // Push notification
                   try {
