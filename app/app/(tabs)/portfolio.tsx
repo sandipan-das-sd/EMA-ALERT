@@ -442,6 +442,26 @@ export default function PortfolioScreen() {
     };
   }, [fetchAll, connectWs]);
 
+  // Live polling: refresh positions, orders & funds every 3s for real-time P&L
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const [p, o, f] = await Promise.all([
+          getPortfolioPositions(),
+          getPortfolioOrders(),
+          getPortfolioFunds(),
+        ]);
+        setPositions(p);
+        setOrders(prev => dedupeOrders([...prev, ...o]));
+        setFunds(f);
+        setLastUpdated(new Date());
+      } catch {
+        // silent — don't spam errors during live polling
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [dedupeOrders]);
+
   // Load P&L when switching to pnl tab or changing segment
   useEffect(() => {
     if (activeTab === 'pnl') fetchPnl(pnlSegment);
