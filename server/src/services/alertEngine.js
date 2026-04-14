@@ -1213,9 +1213,12 @@ export function startAlertEngine({
           }
 
           for (const sig of signals) {
+            let hasMatchingUser = false;
+
             // Broadcast to all subscribed users
             for (const [userId, watchlistSet] of dynamicSubscriptionManager.userWatchlists) {
               if (watchlistSet && watchlistSet.has(instrumentKey) && dynamicSubscriptionManager.getUserTimeframe(userId, instrumentKey) === tfLabel) {
+                hasMatchingUser = true;
                 try {
                   if (typeof broadcastAlert === 'function') {
                     broadcastAlert({
@@ -1271,8 +1274,8 @@ export function startAlertEngine({
               }
             }
 
-            // WhatsApp VWAP alert (sent once per signal, not per user)
-            if (whatsappNumbers.length > 0) {
+            // WhatsApp VWAP alert — only if at least one user has this in their watchlist
+            if (hasMatchingUser && whatsappNumbers.length > 0) {
               sendVwapWhatsAppAlert({
                 instrumentName,
                 entry: sig.entry,
