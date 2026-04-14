@@ -111,6 +111,7 @@ class DynamicSubscriptionManager {
   }
 
   // Get all unique (instrumentKey, timeframe) pairs across all users
+  // Only returns user watchlist instruments — base subscription keys (indices) are excluded
   getAllKeyTimeframePairs() {
     const pairs = new Map(); // "key::tf" -> { key, timeframe }
     for (const [userId, tfMap] of this.userTimeframes) {
@@ -119,13 +120,6 @@ class DynamicSubscriptionManager {
         if (!pairs.has(pairKey)) {
           pairs.set(pairKey, { key, timeframe: tf });
         }
-      }
-    }
-    // Also add base subscribed keys with default 15m
-    for (const key of this.subscribedKeys) {
-      const pairKey = `${key}::15m`;
-      if (!pairs.has(pairKey)) {
-        pairs.set(pairKey, { key, timeframe: '15m' });
       }
     }
     return Array.from(pairs.values());

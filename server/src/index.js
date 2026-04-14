@@ -279,11 +279,9 @@ async function start() {
     // Enhanced mapping: use exact instrument_key if already present, otherwise resolve
     const mappedUniverse = resolvedUniverse; // Already resolved from BOD
 
-    // Subscribe to resolved universe keys
-    const universeKeys = resolvedUniverse.map((u) => u.instrumentKey).filter(Boolean);
-    const envWatchlist = (process.env.UPSTOX_WATCHLIST_KEYS || '').split(',').map(s=>s.trim()).filter(Boolean);
-    // Set base subscription keys in dynamic subscription manager
-    const baseKeys = Array.from(new Set([...universeKeys, ...envWatchlist, ...indexKeys]));
+    // Subscribe only to index keys for market data display
+    // Alert engine will only process user watchlist instruments (no BOD universe)
+    const baseKeys = Array.from(new Set([...indexKeys]));
     dynamicSubscriptionManager.setBaseSubscription(baseKeys);
     
     // Get initial subscription keys (base + user watchlists)
