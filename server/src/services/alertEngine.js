@@ -716,8 +716,8 @@ export function startAlertEngine({
           `   Prev close: ${prevClose.toFixed(2)} (below VWAP ${prevVwap.toFixed(2)})`
         );
 
-        const prevCandleLow = idx > 0 ? Number(sortedCandles[idx - 1][3]) : low;
-        const prevCandleHigh = idx > 0 ? Number(sortedCandles[idx - 1][2]) : high;
+        const prevCandleLow = idx > 0 ? Number(todayCandles[idx - 1][3]) : low;
+        const prevCandleHigh = idx > 0 ? Number(todayCandles[idx - 1][2]) : high;
 
         vwapSignals.push({
           ts: candleStartTs,
