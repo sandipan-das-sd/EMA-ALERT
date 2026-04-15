@@ -855,9 +855,10 @@ feed.on('error', (err) => {
         socket.send(JSON.stringify({ type: 'error', message: 'Upstox access token not configured on server' }));
       }
       
-      // Send initial snapshot of universe prices
+      // Send initial snapshot of subscribed instrument prices
       try {
-        const initialQuotes = universeKeys.map(k => ({
+        const allSubKeys = dynamicSubscriptionManager.getAllSubscriptionKeys();
+        const initialQuotes = allSubKeys.map(k => ({
           key: k,
           ltp: marketState.latestQuotes[k]?.ltp ?? marketState.lastTicks[k]?.ltp ?? null,
           ts: marketState.latestQuotes[k]?.ts ?? marketState.lastTicks[k]?.ts ?? null,
@@ -1346,7 +1347,7 @@ feed.on('error', (err) => {
       }
       try {
         // Test with a few sample instrument keys from our universe
-        const testKeys = universeKeys.slice(0, 3);
+        const testKeys = dynamicSubscriptionManager.getAllSubscriptionKeys().slice(0, 3);
         console.log('[Test LTP] Testing keys:', testKeys);
         
         const results = [];
@@ -1423,7 +1424,7 @@ feed.on('error', (err) => {
         accessTokenPresent: !!tokenStore.current,
         apiBase,
         universeCount: resolvedUniverse.length,
-        universeKeys: universeKeys.slice(0, 5),
+        universeKeys: dynamicSubscriptionManager.getAllSubscriptionKeys().slice(0, 5),
         feedReady,
         lastTicksCount: Object.keys(marketState.lastTicks).length,
         latestQuotesCount: Object.keys(marketState.latestQuotes).length,
