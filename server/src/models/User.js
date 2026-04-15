@@ -92,6 +92,8 @@ const userSchema = new mongoose.Schema(
     // Auto-trade configuration
     autoTrade: {
       enabled: { type: Boolean, default: false },
+      // mode: which strategies auto-trade. 'all' = both, 'ema' = EMA only, 'vwap' = VWAP only, 'off' = alerts only
+      mode: { type: String, enum: ['all', 'ema', 'vwap', 'off'], default: 'all' },
       quantity: { type: Number, default: 1, min: 1 },
       product: { type: String, enum: ['I', 'D', 'MTF'], default: 'I' },
     },

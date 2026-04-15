@@ -437,15 +437,17 @@ export async function searchInstruments(query: string, options: { segments?: str
 }
 
 // Auto-trade settings
+export type AutoTradeMode = 'all' | 'ema' | 'vwap' | 'off';
 export interface AutoTradeSettings {
   enabled: boolean;
+  mode: AutoTradeMode;
   quantity: number;
   product: 'I' | 'D';
 }
 
 export async function getAutoTradeSettings(): Promise<AutoTradeSettings> {
   const data = await request('/auth/autotrade');
-  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+  return data?.autoTrade ?? { enabled: false, mode: 'all', quantity: 1, product: 'I' };
 }
 
 export async function updateAutoTradeSettings(settings: Partial<AutoTradeSettings>): Promise<AutoTradeSettings> {
@@ -453,7 +455,7 @@ export async function updateAutoTradeSettings(settings: Partial<AutoTradeSetting
     method: 'PUT',
     body: settings,
   });
-  return data?.autoTrade ?? { enabled: false, quantity: 1, product: 'I' };
+  return data?.autoTrade ?? { enabled: false, mode: 'all', quantity: 1, product: 'I' };
 }
 
 export async function searchOptionContracts(filters: OptionSearchFilters = {}) {

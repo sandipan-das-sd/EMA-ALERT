@@ -1007,7 +1007,7 @@ export function startAlertEngine({
                     });
 
                     // Auto-trade: place entry order (non-blocking)
-                    autoTradeService.onSignal(userId, instrumentKey, sig).catch((err) =>
+                    autoTradeService.onSignal(userId, instrumentKey, sig, 'ema').catch((err) =>
                       console.error(`[AutoTrade] Signal error for ${instrumentKey}:`, err.message)
                     );
                     
@@ -1245,7 +1245,7 @@ export function startAlertEngine({
                   }
 
                   // Auto-trade: place entry order for VWAP signal (non-blocking)
-                  autoTradeService.onSignal(userId, instrumentKey, sig).catch((err) =>
+                  autoTradeService.onSignal(userId, instrumentKey, sig, 'vwap').catch((err) =>
                     console.error(`[AutoTrade] VWAP signal error for ${instrumentKey}:`, err.message)
                   );
 
