@@ -314,21 +314,36 @@ async function onSignal(userId, instrumentKey, sig) {
  * Called on every alertEngine tick with fresh candle data.
  * Manages pending entry checks and trailing SL ratchet.
  */
-async function onCandleTick(instrumentKey, candles) {
-  const timeframeMs = 15 * 60 * 1000;
+async function onCandleTick(instrumentKey, candles, intervalMinutes) {
   const now = Date.now();
+
+  // Sort once outside loop — shared by all trades for this instrument
+  const sorted = [...candles].sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
+
+  // Determine candle timeframe: use explicit value, or detect from data gaps
+  let timeframeMs;
+  if (intervalMinutes && intervalMinutes > 0) {
+    timeframeMs = intervalMinutes * 60 * 1000;
+  } else if (sorted.length >= 2) {
+    let minGap = Infinity;
+    for (let i = 1; i < Math.min(sorted.length, 20); i++) {
+      const gap = Date.parse(sorted[i][0]) - Date.parse(sorted[i - 1][0]);
+      if (gap > 0 && gap < minGap) minGap = gap;
+    }
+    timeframeMs = minGap < Infinity ? minGap : 15 * 60 * 1000;
+  } else {
+    timeframeMs = 15 * 60 * 1000;
+  }
 
   for (const [tradeKey, trade] of activeTrades) {
     if (trade.instrumentKey !== instrumentKey) continue;
 
     try {
-      // Sort ascending by candle ts
-      const sorted = [...candles].sort((a, b) => Date.parse(a[0]) - Date.parse(b[0]));
 
       // ---- PENDING ENTRY: check if order filled ----
       if (trade.status === 'pending_entry') {
         const info = await getOrderDetails(trade.accessToken, trade.orderId);
-        if (!info) return;
+        if (!info) continue;
 
         if (info.status === 'complete') {
           const filledTrade = { ...trade, status: 'in_trade' };
@@ -341,7 +356,7 @@ async function onCandleTick(instrumentKey, candles) {
           await deleteTrade(tradeKey);
         }
         // still pending → wait
-        return;
+        continue;
       }
 
       // ---- IN TRADE: trail SL on each newly closed candle ----
@@ -353,13 +368,13 @@ async function onCandleTick(instrumentKey, candles) {
           return now >= end && start > trade.signalTs;
         });
 
-        if (closedAfterEntry.length === 0) return;
+        if (closedAfterEntry.length === 0) continue;
 
         const latestClosed = closedAfterEntry[closedAfterEntry.length - 1];
         const latestTs = Date.parse(latestClosed[0]);
 
         // Already processed this candle
-        if (latestTs <= (trade.lastCandleTs || 0)) return;
+        if (latestTs <= (trade.lastCandleTs || 0)) continue;
 
         const candleHigh = Number(latestClosed[2]);
         const candleLow = Number(latestClosed[3]);

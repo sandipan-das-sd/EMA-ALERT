@@ -901,7 +901,7 @@ export function startAlertEngine({
                 // Auto-trade: monitor active trades on every candle tick (once per instrument)
                 if (!tickedAutoTradeKeys.has(origKey)) {
                   tickedAutoTradeKeys.add(origKey);
-                  autoTradeService.onCandleTick(origKey, data).catch((err) =>
+                  autoTradeService.onCandleTick(origKey, data, intervalMinutes).catch((err) =>
                     console.error(`[AutoTrade] Tick error for ${origKey}:`, err.message)
                   );
                 }
