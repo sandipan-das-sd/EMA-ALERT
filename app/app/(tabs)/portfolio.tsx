@@ -30,7 +30,6 @@ import {
   getPortfolioProfile,
   updateAutoTradeSettings,
   type ActiveTrade,
-  type AutoTradeMode,
   type BrokerageResult,
   type PortfolioFunds,
   type PortfolioHolding,
@@ -270,9 +269,7 @@ export default function PortfolioScreen() {
 
   const [activeTab, setActiveTab] = useState<TabKey>("positions");
   const [autoTradeOn, setAutoTradeOn] = useState(false);
-  const [autoTradeMode, setAutoTradeMode] = useState<AutoTradeMode>('all');
   const [autoTradeToggling, setAutoTradeToggling] = useState(false);
-  const [showModePicker, setShowModePicker] = useState(false);
   const [funds, setFunds] = useState<PortfolioFunds | null>(null);
   const [profile, setProfile] = useState<PortfolioProfile | null>(null);
   const [orders, setOrders] = useState<PortfolioOrder[]>([]);
@@ -413,58 +410,24 @@ export default function PortfolioScreen() {
   // Load auto-trade toggle state on mount
   useEffect(() => {
     getAutoTradeSettings()
-      .then(s => {
-        setAutoTradeOn(s.enabled);
-        setAutoTradeMode(s.mode || 'all');
-      })
+      .then(s => setAutoTradeOn(s.enabled))
       .catch(() => {});
   }, []);
 
   const handleAutoTradeToggle = useCallback(async () => {
     if (autoTradeToggling) return;
-    if (autoTradeOn) {
-      // Turning OFF — show mode picker to choose what to disable
-      setShowModePicker(true);
-      return;
-    }
-    // Turning ON — enable with current mode
     setAutoTradeToggling(true);
+    const next = !autoTradeOn;
     try {
-      await updateAutoTradeSettings({ enabled: true, mode: autoTradeMode });
-      setAutoTradeOn(true);
-      const modeLabel = autoTradeMode === 'all' ? 'All strategies' : autoTradeMode === 'ema' ? 'EMA only' : autoTradeMode === 'vwap' ? 'VWAP only' : 'Off';
-      showToast(`Auto-trade ON — ${modeLabel}`);
+      await updateAutoTradeSettings({ enabled: next });
+      setAutoTradeOn(next);
+      showToast(next ? 'Auto-trade ON — orders will be placed' : 'Auto-trade OFF — alerts only, no orders');
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Failed to update auto-trade');
     } finally {
       setAutoTradeToggling(false);
     }
-  }, [autoTradeOn, autoTradeToggling, autoTradeMode]);
-
-  const handleModeSelect = useCallback(async (mode: AutoTradeMode) => {
-    setShowModePicker(false);
-    setAutoTradeToggling(true);
-    try {
-      if (mode === 'off') {
-        // Disable auto-trade entirely
-        await updateAutoTradeSettings({ enabled: false, mode: 'off' });
-        setAutoTradeOn(false);
-        setAutoTradeMode('off');
-        showToast('Auto-trade OFF — alerts only, no orders');
-      } else {
-        // Enable with selected mode
-        await updateAutoTradeSettings({ enabled: true, mode });
-        setAutoTradeOn(true);
-        setAutoTradeMode(mode);
-        const modeLabel = mode === 'all' ? 'All strategies' : mode === 'ema' ? 'EMA only' : 'VWAP only';
-        showToast(`Auto-trade ON — ${modeLabel}`);
-      }
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Failed to update');
-    } finally {
-      setAutoTradeToggling(false);
-    }
-  }, []);
+  }, [autoTradeOn, autoTradeToggling]);
 
   useEffect(() => {
     fetchAll();
@@ -652,42 +615,13 @@ export default function PortfolioScreen() {
                   Auto-Trade {autoTradeOn ? 'ON' : 'OFF'}
                 </ThemedText>
                 <ThemedText style={{ fontSize: 11, color: autoTradeOn ? '#bbf7d0' : palette.muted }}>
-                  {autoTradeOn
-                    ? (autoTradeMode === 'all' ? 'All strategies' : autoTradeMode === 'ema' ? 'EMA only' : autoTradeMode === 'vwap' ? 'VWAP only' : 'Off')
-                    : 'Alerts only — no orders placed'}
+                  {autoTradeOn ? 'Orders will be placed on EMA signals' : 'Alerts only — no orders placed'}
                 </ThemedText>
               </View>
               <ThemedText style={[styles.autoTradeToggleLabel, { color: autoTradeOn ? '#fff' : palette.muted }]}>
-                {autoTradeToggling ? '...' : autoTradeOn ? 'Tap to change' : 'Tap to enable'}
+                {autoTradeToggling ? '...' : autoTradeOn ? 'Tap to pause' : 'Tap to enable'}
               </ThemedText>
             </Pressable>
-
-            {/* Mode picker modal */}
-            {showModePicker && (
-              <View style={[styles.modePicker, { backgroundColor: palette.card, borderColor: palette.border }]}>
-                <ThemedText style={{ fontSize: 14, fontWeight: '700', marginBottom: 10, color: palette.text }}>Auto-Trade Mode</ThemedText>
-                {[
-                  { mode: 'all' as AutoTradeMode, label: 'All (EMA + VWAP)', desc: 'Both strategies will auto-trade' },
-                  { mode: 'ema' as AutoTradeMode, label: 'EMA Only', desc: 'Only EMA signals auto-trade, VWAP alerts only' },
-                  { mode: 'vwap' as AutoTradeMode, label: 'VWAP Only', desc: 'Only VWAP signals auto-trade, EMA alerts only' },
-                  { mode: 'off' as AutoTradeMode, label: 'Off (Alerts Only)', desc: 'No auto-trade, receive alerts only' },
-                ].map(opt => (
-                  <Pressable
-                    key={opt.mode}
-                    onPress={() => handleModeSelect(opt.mode)}
-                    style={[styles.modeOption, {
-                      backgroundColor: autoTradeMode === opt.mode ? '#0891b222' : 'transparent',
-                      borderColor: autoTradeMode === opt.mode ? '#0891b2' : palette.border,
-                    }]}>
-                    <ThemedText style={{ fontSize: 14, fontWeight: '600', color: palette.text }}>{opt.label}</ThemedText>
-                    <ThemedText style={{ fontSize: 11, color: palette.muted }}>{opt.desc}</ThemedText>
-                  </Pressable>
-                ))}
-                <Pressable onPress={() => setShowModePicker(false)} style={{ marginTop: 8, alignItems: 'center' }}>
-                  <ThemedText style={{ fontSize: 13, color: palette.muted }}>Cancel</ThemedText>
-                </Pressable>
-              </View>
-            )}
 
             {/* Error banner */}
             {error && (
@@ -825,18 +759,6 @@ const styles = StyleSheet.create({
   },
   autoTradeBtnTitle: { fontSize: 15, fontWeight: '700' },
   autoTradeToggleLabel: { fontSize: 11, fontWeight: '600' },
-  modePicker: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 12,
-  },
-  modeOption: {
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 10,
-    marginBottom: 6,
-  },
 
   errorBanner: {
     borderWidth: 1,

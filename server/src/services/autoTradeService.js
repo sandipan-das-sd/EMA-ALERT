@@ -138,11 +138,10 @@ async function getOrderDetails(accessToken, orderId) {
 // ------------------ Core trade logic ------------------
 
 /**
- * Called when an EMA cross or VWAP signal fires.
+ * Called when an EMA cross signal fires.
  * Places a DAY LIMIT order (BUY or SELL short) based on per-instrument direction.
- * @param {string} strategy - 'ema' or 'vwap'
  */
-async function onSignal(userId, instrumentKey, sig, strategy = 'ema') {
+async function onSignal(userId, instrumentKey, sig) {
   const tradeKey = `${userId}:${instrumentKey}`;
 
   // ── GUARD 1: In-memory check (fast path) ──────────────────────────────────
@@ -200,22 +199,6 @@ async function onSignal(userId, instrumentKey, sig, strategy = 'ema') {
       console.log(`[AutoTrade] ⏭️  SKIP: autoTrade not enabled for user ${userId}`);
       return;
     }
-
-    // Check mode: 'all' = both strategies trade, 'ema' = only EMA trades, 'vwap' = only VWAP trades, 'off' = no trades
-    const mode = user.autoTrade.mode || 'all';
-    if (mode === 'off') {
-      console.log(`[AutoTrade] ⏭️  SKIP: autoTrade mode is OFF for user ${userId}`);
-      return;
-    }
-    if (mode === 'ema' && strategy !== 'ema') {
-      console.log(`[AutoTrade] ⏭️  SKIP: mode=ema but signal is ${strategy} for ${instrumentKey}`);
-      return;
-    }
-    if (mode === 'vwap' && strategy !== 'vwap') {
-      console.log(`[AutoTrade] ⏭️  SKIP: mode=vwap but signal is ${strategy} for ${instrumentKey}`);
-      return;
-    }
-
     if (!user.upstoxAccessToken) {
       console.warn(
         `[AutoTrade] ⚠️  No Upstox token for user ${userId}, cannot auto-trade ${instrumentKey}`

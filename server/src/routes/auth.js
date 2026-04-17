@@ -572,7 +572,7 @@ router.get('/me', async (req, res) => {
       User.findById(decoded.id).select('+upstoxAccessToken').then((user) => {
         if (!user) return res.status(200).json({ user: null });
         if (user.isActive === false) return res.status(200).json({ user: null });
-        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive, autoTrade: user.autoTrade || { enabled: false, mode: 'all', quantity: 1, product: 'I' } } });
+        res.json({ user: { id: user._id, name: user.name, email: user.email, phone: user.phone || '', watchlist: user.watchlist || [], hasUpstoxToken: !!user.upstoxAccessToken, role: user.role, isActive: user.isActive, autoTrade: user.autoTrade || { enabled: false, quantity: 1, product: 'I' } } });
     });
   });
 });
@@ -582,7 +582,7 @@ router.get('/autotrade', async (req, res) => {
   const { user, status, message } = await getAuthenticatedUser(req);
   if (!user) return res.status(status).json({ message });
   res.json({
-    autoTrade: user.autoTrade || { enabled: false, mode: 'all', quantity: 1, product: 'I' },
+    autoTrade: user.autoTrade || { enabled: false, quantity: 1, product: 'I' },
   });
 });
 
@@ -591,11 +591,10 @@ router.put('/autotrade', async (req, res) => {
   const { user, status, message } = await getAuthenticatedUser(req);
   if (!user) return res.status(status).json({ message });
 
-  const { enabled, quantity, product, mode } = req.body;
+  const { enabled, quantity, product } = req.body;
 
   const update = {};
   if (typeof enabled === 'boolean') update['autoTrade.enabled'] = enabled;
-  if (['all', 'ema', 'vwap', 'off'].includes(mode)) update['autoTrade.mode'] = mode;
   if (Number.isFinite(Number(quantity)) && Number(quantity) >= 1) {
     update['autoTrade.quantity'] = Math.floor(Number(quantity));
   }
