@@ -1244,11 +1244,6 @@ export function startAlertEngine({
                     });
                   }
 
-                  // Auto-trade: place entry order for VWAP signal (non-blocking)
-                  autoTradeService.onSignal(userId, instrumentKey, sig).catch((err) =>
-                    console.error(`[AutoTrade] VWAP signal error for ${instrumentKey}:`, err.message)
-                  );
-
                   // Push notification
                   try {
                     const User = (await import('../models/User.js')).default;
